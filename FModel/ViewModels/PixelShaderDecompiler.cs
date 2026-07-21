@@ -239,6 +239,7 @@ public static class PixelShaderDecompiler
         public readonly UMaterialInterface Material = material;
         public readonly FUniformExpressionSetLegacy ExpressionSet = expressionSet;
         public readonly IReadOnlyList<UTexture?>? ReferencedTextures = referencedTextures;
+        public readonly MaterialShaderDecompiler.InstanceParameterOverrides Overrides = MaterialShaderDecompiler.InstanceParameterOverrides.Build(material);
         public readonly Dictionary<int, MaterialParameterCollectionResolver.ResolvedCollection?> CollectionCache = new();
         public readonly Dictionary<int, int> LeftoverCbRegisterToCollectionIndex = new();
         public readonly Dictionary<PixelExpressionNode, int> RefCounts = new(ReferenceEqualityComparer.Instance);
@@ -333,7 +334,7 @@ public static class PixelShaderDecompiler
 
     private static string ResolveUniform(FMaterialUniformExpressionLegacy[] expressions, int index, string fallbackPrefix, PrintCtx ctx)
         => index >= 0 && index < expressions.Length
-            ? MaterialShaderDecompiler.PrintExpression(expressions[index], ctx.ReferencedTextures)
+            ? MaterialShaderDecompiler.PrintExpression(expressions[index], ctx.ReferencedTextures, ctx.Overrides)
             : $"{fallbackPrefix}{index} /* out of range */";
 
     /// <summary>
@@ -358,7 +359,7 @@ public static class PixelShaderDecompiler
         };
 
         var name = array != null && source.Index >= 0 && source.Index < array.Length
-            ? MaterialShaderDecompiler.PrintExpression(array[source.Index], ctx.ReferencedTextures)
+            ? MaterialShaderDecompiler.PrintExpression(array[source.Index], ctx.ReferencedTextures, ctx.Overrides)
             : $"Texture[slot={source.TextureSlot}, index={source.Index}]";
         return source.Channel >= 0 ? $"{name}.{"rgba"[source.Channel]}" : name;
     }

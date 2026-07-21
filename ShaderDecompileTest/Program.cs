@@ -9,7 +9,7 @@ using FModel.ViewModels;
 
 const string paksPath = @"V:\.builds\10.40\FortniteGame\Content\Paks";
 const string aesKey = "0x3FF229552FE0F0DC46A495F9E94766EB6B5106A136597C60E7132F413B7C016E";
-const string assetPath = "FortniteGame/Content/Packages/Fortress_SharedMaterials/Base_Material/M_FN_Character_MASTER";
+const string assetPath = "FortniteGame/Content/Characters/Player/Female/Medium/Bodies/F_Med_Soldier_01/Skins/BR_Grave/Materials/F_MED_Body_Grave";
 
 Console.WriteLine($"Mounting {paksPath} ...");
 var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_23), StringComparer.OrdinalIgnoreCase)
@@ -164,6 +164,25 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
             Console.WriteLine($"   TBasePassPSFNoLightMapPolicy (Quality={shaderMap.ShaderMapId.QualityLevel}) MaterialUniformBuffer.BaseIndex={basePassShader.MaterialParameters?.MaterialUniformBuffer.BaseIndex} bound={basePassShader.MaterialParameters?.MaterialUniformBuffer.bIsBound}");
             Console.WriteLine($"   all UniformBufferParameters: {string.Join(", ", basePassShader.UniformBufferParameters.Select(p => $"{(string.IsNullOrEmpty(p.Name) ? "(unnamed)" : p.Name)}@{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
         }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Instance parameter overrides (this object only, not inherited) -----");
+    if (material is UMaterialInstanceConstant instanceConstant)
+    {
+        Console.WriteLine($"  VectorParameterValues: {instanceConstant.VectorParameterValues.Length}");
+        foreach (var v in instanceConstant.VectorParameterValues)
+            Console.WriteLine($"    {v.ParameterInfo.Name} = {v.ParameterValue}");
+        Console.WriteLine($"  ScalarParameterValues: {instanceConstant.ScalarParameterValues.Length}");
+        foreach (var s in instanceConstant.ScalarParameterValues)
+            Console.WriteLine($"    {s.ParameterInfo.Name} = {s.ParameterValue}");
+        Console.WriteLine($"  TextureParameterValues: {instanceConstant.TextureParameterValues.Length}");
+        foreach (var t in instanceConstant.TextureParameterValues)
+            Console.WriteLine($"    {t.ParameterInfo.Name} = {t.ParameterValue.Name}");
+    }
+    else
+    {
+        Console.WriteLine($"  (not a UMaterialInstanceConstant - actual type: {material.GetType().Name})");
     }
 
     Console.WriteLine();

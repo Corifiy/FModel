@@ -356,6 +356,46 @@ code path in the material:
    evidence by name, not just by mechanism. Re-ran the full harness afterward: zero exceptions, no
    regressions elsewhere.
 
+### Material Instance parameter override resolution
+
+Requested after testing a real `MaterialInstanceConstant` for the first time this session
+(`FortniteGame/Content/.../F_MED_Body_Grave`, a skin instance of `M_FN_Character_MASTER`). Its
+`LoadedMaterialResources` decompiles fine (byte-identical DXBC to its parent, as expected — a plain
+value-parameter skin doesn't force a separate shader compile), but every `VectorParameter`/
+`ScalarParameter`/`TextureParameter` node printed only the *base material's* compile-time default
+(e.g. bare `Diffuse`, `ColorHigh` identifiers) - never this specific instance's own override, even
+though the instance genuinely has one (dumped directly: 4 texture overrides incl.
+`Diffuse=T_F_MED_Grave_Body_D`, plus `Skin Boost Color And Exponent=FFD2D4`, `RoughnessMax=1`,
+`RoughnessMin=0`, etc.). Decompiling an instance specifically to only ever see the master's generic
+defaults defeats the purpose, so this was fixed rather than left as a known gap:
+
+- **New `MaterialShaderDecompiler.InstanceParameterOverrides`**: walks from the queried material up
+  through `UMaterialInstance.Parent` (guarded, max 16 hops), collecting `VectorParameterValues`/
+  `ScalarParameterValues`/`TextureParameterValues` with first-seen-wins per parameter name. This
+  matches `UMaterialInstance::GetVectorParameterValue`'s own real lookup order exactly (checks its
+  own value first, only delegates to `Parent->Get...()` when it has none) - not an approximation of
+  it.
+- **Threaded through both decompiler layers** as an optional trailing parameter (`null` default, so
+  every existing call site - and a plain `UMaterial` with no instance chain, which resolves to an
+  `Empty` override set - is behaviorally unchanged): `MaterialShaderDecompiler.Print`/`PrintExpression`
+  now annotate a `VectorParameter`/`ScalarParameter`/`TextureParameter` node with
+  `[instance: <value>]` whenever the override dictionary has an entry for that exact parameter name;
+  `PixelShaderDecompiler.PrintCtx` builds one `InstanceParameterOverrides` per resource and passes it
+  into every `ResolveUniform`/`DescribeTexture` call. Square brackets, not a `/* */` comment - the
+  same reason `DescribeHardTexture`'s `[Texture N]` suffix uses them: this can appear inside a
+  `sample`/`cbrow` node's own trailing comment, and a nested `/* */` was already a real bug fixed
+  earlier this session.
+- **Verified against real data**: `F_MED_Body_Grave`'s decompile now reads
+  `sample_b(_4, _5.y) /* Diffuse [instance: T_F_MED_Grave_Body_D] */` (and the same for `M`/
+  `Normals`/`SpecularMasks`, each resolving to this skin's own texture asset), and
+  `Skin_Boost_Color_And_Exponent [instance: Color(1, 0.645, 0.654, 2)]` - which, decoded through
+  linear-to-sRGB (the same encoding `FLinearColor`'s own hex `ToString()` uses), is exactly `FFD2D4`,
+  matching the raw override dump byte-for-byte. `RoughnessMin`/`RoughnessMax` show `[instance: 0]`/
+  `[instance: 1]`, matching too. Parameters this instance does *not* override (`ColorHigh`, `HitGlow`,
+  ...) print exactly as before, with no spurious annotation. Re-ran the full harness against
+  `M_FN_Character_MASTER` (a plain `UMaterial`, no instance chain) afterward to confirm zero
+  regression: output byte-identical to before this change, including the MPC resolution above.
+
 ## CUE4Parse fixes made this session
 
 The shared shader code library (`.ushaderbytecode`) — needed to actually fetch a shader's compiled
