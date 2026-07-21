@@ -1,0 +1,436 @@
+[
+  {
+    "Type": "Material",
+    "Name": "arrows_animated",
+    "Flags": "RF_Public | RF_Standalone | RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'Material'",
+    "Package": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated",
+    "Properties": {
+      "MaterialDomain": "EMaterialDomain::MD_UI",
+      "BlendMode": "EBlendMode::BLEND_Translucent",
+      "bCanMaskedBeAssumedOpaque": true,
+      "PixelDepthOffsetMode": "EPixelDepthOffsetMode::PDOM_Legacy",
+      "StateId": "2F716612-A6A70FF9-5CC4369A-A0A5C809",
+      "bIncludedInBaseGame": true,
+      "EmissiveColor": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionConstant3Vector'arrows_animated:MaterialExpressionConstant3Vector_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.1"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionConstant3Vector_0",
+        "UseConstant": false,
+        "Constant": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 0,
+          "Hex": "000000"
+        }
+      },
+      "Opacity": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionMultiply'arrows_animated:MaterialExpressionMultiply_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.2"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionMultiply_0",
+        "UseConstant": false,
+        "Constant": 1.0
+      },
+      "ExpressionCollection": {
+        "Expressions": [
+          {
+            "ObjectName": "MaterialExpressionConstant3Vector'arrows_animated:MaterialExpressionConstant3Vector_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.1"
+          },
+          {
+            "ObjectName": "MaterialExpressionMultiply'arrows_animated:MaterialExpressionMultiply_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.2"
+          },
+          {
+            "ObjectName": "MaterialExpressionTextureSample'arrows_animated:MaterialExpressionTextureSample_3'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.7"
+          },
+          {
+            "ObjectName": "MaterialExpressionPanner'arrows_animated:MaterialExpressionPanner_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.4"
+          },
+          {
+            "ObjectName": "MaterialExpressionTextureCoordinate'arrows_animated:MaterialExpressionTextureCoordinate_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.5"
+          },
+          {
+            "ObjectName": "MaterialExpressionTextureSample'arrows_animated:MaterialExpressionTextureSample_4'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.8"
+          },
+          {
+            "ObjectName": "MaterialExpressionOneMinus'arrows_animated:MaterialExpressionOneMinus_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.3"
+          },
+          {
+            "ObjectName": "MaterialExpressionTextureCoordinate'arrows_animated:MaterialExpressionTextureCoordinate_1'",
+            "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.6"
+          }
+        ]
+      }
+    },
+    "LoadedMaterialResources": [],
+    "CachedExpressionData": {
+      "RuntimeEntries": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[1]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[2]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[3]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[4]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[5]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[6]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[7]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[8]": {
+        "ParameterInfoSet": []
+      },
+      "ScalarPrimitiveDataIndexValues": [],
+      "VectorPrimitiveDataIndexValues": [],
+      "ScalarValues": [],
+      "StaticSwitchValues": [],
+      "DynamicSwitchValues": [],
+      "VectorValues": [],
+      "DoubleVectorValues": [],
+      "TextureValues": [],
+      "TextureCollectionValues": [],
+      "FontValues": [],
+      "FontPageValues": [],
+      "RuntimeVirtualTextureValues": [],
+      "SparseVolumeTextureValues": [],
+      "ReferencedTextures": [
+        {
+          "ObjectName": "Texture2D'Pattern-HeavyArrows'",
+          "ObjectPath": "/Game/UI/Foundation/Textures/Pattern/Pattern-HeavyArrows.0"
+        },
+        {
+          "ObjectName": "Texture2D'linear_gradient'",
+          "ObjectPath": "/Game/Global/Textures/Default/Masks_and_Gradients/linear_gradient.0"
+        }
+      ],
+      "ReferencedTextureCollections": [],
+      "FunctionInfos": [],
+      "FunctionInfosStateCRC": 4294967295,
+      "ParameterCollectionInfos": [],
+      "GrassTypes": [],
+      "MaterialLayers": {
+        "Layers": [],
+        "Blends": [],
+        "Tree": {
+          "Nodes": [],
+          "Payloads": [],
+          "Root": -2
+        }
+      },
+      "DynamicParameterNames": [],
+      "QualityLevelsUsed": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "bHasMaterialLayers": false,
+      "bHasRuntimeVirtualTextureOutput": false,
+      "bHasSceneColor": false,
+      "bHasPerInstanceCustomData": false,
+      "bHasPerInstanceRandom": false,
+      "bHasVertexInterpolator": false,
+      "PropertyConnectedMask": 3
+    },
+    "ReferencedTextures": [
+      {
+        "ObjectName": "Texture2D'linear_gradient'",
+        "ObjectPath": "/Game/Global/Textures/Default/Masks_and_Gradients/linear_gradient.0"
+      },
+      {
+        "ObjectName": "Texture2D'Pattern-HeavyArrows'",
+        "ObjectPath": "/Game/UI/Foundation/Textures/Pattern/Pattern-HeavyArrows.0"
+      }
+    ]
+  },
+  {
+    "Type": "MaterialExpressionConstant3Vector",
+    "Name": "MaterialExpressionConstant3Vector_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionConstant3Vector'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "Constant": {
+        "R": 1.0,
+        "G": 1.0,
+        "B": 1.0,
+        "A": 1.0,
+        "Hex": "FFFFFF"
+      },
+      "MaterialExpressionEditorX": -483,
+      "MaterialExpressionEditorY": -197,
+      "MaterialExpressionGuid": "A09D0ABE-48D54967-0BEBFBA8-14252D74",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionMultiply",
+    "Name": "MaterialExpressionMultiply_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionMultiply'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionTextureSample'arrows_animated:MaterialExpressionTextureSample_3'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.7"
+        },
+        "OutputIndex": 1,
+        "InputName": "None",
+        "Mask": 1,
+        "MaskR": 1,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionTextureSample_3"
+      },
+      "B": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionOneMinus'arrows_animated:MaterialExpressionOneMinus_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.3"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionOneMinus_0"
+      },
+      "MaterialExpressionEditorX": -448,
+      "MaterialExpressionEditorY": 128,
+      "MaterialExpressionGuid": "9913D6FD-4E309E1E-85CBAB85-D42389DF",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionOneMinus",
+    "Name": "MaterialExpressionOneMinus_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionOneMinus'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionTextureSample'arrows_animated:MaterialExpressionTextureSample_4'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.8"
+        },
+        "OutputIndex": 4,
+        "InputName": "None",
+        "Mask": 1,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 1,
+        "ExpressionName": "MaterialExpressionTextureSample_4"
+      },
+      "MaterialExpressionEditorX": -560,
+      "MaterialExpressionEditorY": 256,
+      "MaterialExpressionGuid": "7959CE6F-487AC916-156D85B7-E805EAB5",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionPanner",
+    "Name": "MaterialExpressionPanner_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionPanner'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "Coordinate": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionTextureCoordinate'arrows_animated:MaterialExpressionTextureCoordinate_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.5"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionTextureCoordinate_0"
+      },
+      "SpeedX": -0.35,
+      "MaterialExpressionEditorX": -768,
+      "MaterialExpressionEditorY": -32,
+      "MaterialExpressionGuid": "288CEB60-4E469C7E-9FAFFC95-9F246FC9",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionTextureCoordinate",
+    "Name": "MaterialExpressionTextureCoordinate_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionTextureCoordinate'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "MaterialExpressionEditorX": -896,
+      "MaterialExpressionEditorY": -32,
+      "MaterialExpressionGuid": "B97A1CCA-4A5EC17F-EBFC75AD-4CC22CCB",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionTextureCoordinate",
+    "Name": "MaterialExpressionTextureCoordinate_1",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionTextureCoordinate'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "UTiling": 1.25,
+      "MaterialExpressionEditorX": -939,
+      "MaterialExpressionEditorY": 156,
+      "MaterialExpressionGuid": "03288EC1-4E77A41A-776BD2BC-48882B46",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionTextureSample",
+    "Name": "MaterialExpressionTextureSample_3",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionTextureSample'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "Coordinates": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionPanner'arrows_animated:MaterialExpressionPanner_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.4"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionPanner_0"
+      },
+      "Texture": {
+        "ObjectName": "Texture2D'Pattern-HeavyArrows'",
+        "ObjectPath": "/Game/UI/Foundation/Textures/Pattern/Pattern-HeavyArrows.0"
+      },
+      "MaterialExpressionEditorX": -624,
+      "MaterialExpressionEditorY": -32,
+      "MaterialExpressionGuid": "E78DB81B-42B9BA96-0CA4CD8D-2136D68D",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionTextureSample",
+    "Name": "MaterialExpressionTextureSample_4",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionTextureSample'",
+    "Outer": {
+      "ObjectName": "Material'arrows_animated'",
+      "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+    },
+    "Properties": {
+      "Coordinates": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionTextureCoordinate'arrows_animated:MaterialExpressionTextureCoordinate_1'",
+          "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.6"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionTextureCoordinate_1"
+      },
+      "Texture": {
+        "ObjectName": "Texture2D'linear_gradient'",
+        "ObjectPath": "/Game/Global/Textures/Default/Masks_and_Gradients/linear_gradient.0"
+      },
+      "SamplerType": "EMaterialSamplerType::SAMPLERTYPE_LinearColor",
+      "MaterialExpressionEditorX": -816,
+      "MaterialExpressionEditorY": 160,
+      "MaterialExpressionGuid": "E78DB81B-42B9BA96-0CA4CD8D-2136D68D",
+      "Material": {
+        "ObjectName": "Material'arrows_animated'",
+        "ObjectPath": "/SaveTheWorld/UI/Frontend/Rewards/materials/arrows_animated.0"
+      }
+    }
+  }
+]

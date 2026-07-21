@@ -278,4 +278,13 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\CUE4Parse\CUE4Parse.slnx">
+      <Link>CUE4Parse.slnx</Link>
+    </Content>
+    <Content Include="..\CUE4Parse\CUE4Parse\CUE4Parse.csproj">
+      <Link>CUE4Parse.csproj</Link>
+    </Content>
+  </ItemGroup>
+
 </Project>

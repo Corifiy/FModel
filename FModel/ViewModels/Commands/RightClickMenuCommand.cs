@@ -32,6 +32,7 @@ public class RightClickMenuCommand : ViewModelCommand<ApplicationViewModel>
         Metadata,
         References,
         Decompile,
+        DecompileShader,
     }
 
     public override async void Execute(ApplicationViewModel contextViewModel, object parameter)
@@ -62,6 +63,7 @@ public class RightClickMenuCommand : ViewModelCommand<ApplicationViewModel>
             "Assets_Show_Metadata" => (EAction.Show, EShowAssetType.Metadata, EBulkType.None),
             "Assets_Show_References" => (EAction.Show, EShowAssetType.References, EBulkType.None),
             "Assets_Decompile" => (EAction.Show, EShowAssetType.Decompile, EBulkType.Code),
+            "Assets_Decompile_Shader" => (EAction.Show, EShowAssetType.DecompileShader, EBulkType.Code),
 
             "Save_Data" => (EAction.Export, EShowAssetType.None, EBulkType.Raw),
             "Save_Properties" => (EAction.Export, EShowAssetType.None, EBulkType.Properties),
@@ -88,6 +90,7 @@ public class RightClickMenuCommand : ViewModelCommand<ApplicationViewModel>
                     EShowAssetType.JSON => entry => contextViewModel.CUE4Parse.Extract(cancellationToken, entry, true),
                     EShowAssetType.Metadata => entry => contextViewModel.CUE4Parse.ShowMetadata(entry),
                     EShowAssetType.Decompile => entry => contextViewModel.CUE4Parse.Decompile(entry),
+                    EShowAssetType.DecompileShader => entry => contextViewModel.CUE4Parse.DecompileShader(entry),
                     EShowAssetType.References => entry => contextViewModel.CUE4Parse.FindReferences(entry),
                     _ => throw new ArgumentOutOfRangeException("Unsupported asset action type."),
                 };

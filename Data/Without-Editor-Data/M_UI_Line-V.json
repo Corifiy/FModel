@@ -1,0 +1,2957 @@
+[
+  {
+    "Type": "Material",
+    "Name": "M_UI_Line-V",
+    "Flags": "RF_Public | RF_Standalone | RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'Material'",
+    "Package": "FortniteGame/Content/UI/Materials/M_UI_Line-V",
+    "Properties": {
+      "EmissiveColor": {
+        "Expression": null,
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionConstant3Vector_0",
+        "UseConstant": false,
+        "Constant": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 0,
+          "Hex": "000000"
+        }
+      },
+      "MaterialDomain": "MD_UI",
+      "BlendMode": "BLEND_Translucent",
+      "Expressions": [
+        null,
+        null,
+        null,
+        {
+          "ObjectName": "MaterialExpressionMaterialFunctionCall'M_UI_Line-V:MaterialExpressionMaterialFunctionCall_0'",
+          "ObjectPath": "FortniteGame/Content/UI/Materials/M_UI_Line-V.1"
+        },
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "MaterialFunctionInfos": [
+        {
+          "StateId": "2C1DDB6E-406BC9FC-1D4141A1-7C82122A",
+          "Function": {
+            "ObjectName": "MaterialFunction'BreakOutFloat2Components'",
+            "ObjectPath": "Engine/Content/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat2Components.0"
+          }
+        }
+      ],
+      "bCanMaskedBeAssumedOpaque": true,
+      "StateId": "19FF4996-466FE8D4-1D01BB99-1D85646B",
+      "CachedQualityLevelsUsed": [
+        false,
+        true,
+        false
+      ]
+    },
+    "LoadedMaterialResources": [
+      {
+        "LoadedShaderMap": null,
+        "LoadedShaderMapLegacy": {
+          "ShaderMapId": {
+            "QualityLevel": 0,
+            "FeatureLevel": 3,
+            "CookedShaderMapIdHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0"
+          },
+          "ShaderPlatform": "SP_PCD3D_SM5",
+          "FriendlyName": "M_UI_Line-V",
+          "MaterialCompilationOutput": {
+            "UniformExpressionSet": {
+              "UniformVectorExpressions": [
+                {
+                  "TypeName": "FMaterialUniformExpressionVectorParameter",
+                  "Operands": [],
+                  "Values": [
+                    {
+                      "Key": "Parameter",
+                      "Value": "SelectionColor"
+                    },
+                    {
+                      "Key": "Default",
+                      "Value": "000000"
+                    }
+                  ],
+                  "ParameterName": "SelectionColor",
+                  "ParameterAssociation": 2,
+                  "ParameterIndex": -1,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": {
+                    "R": 0.0,
+                    "G": 0.0,
+                    "B": 0.0,
+                    "A": 1.0,
+                    "Hex": "000000"
+                  },
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": null
+                },
+                {
+                  "TypeName": "FMaterialUniformExpressionComponentSwizzle",
+                  "Operands": [
+                    {
+                      "Key": "X",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionVectorParameter",
+                        "Operands": [],
+                        "Values": [
+                          {
+                            "Key": "Parameter",
+                            "Value": "SelectionColor"
+                          },
+                          {
+                            "Key": "Default",
+                            "Value": "000000"
+                          }
+                        ],
+                        "ParameterName": "SelectionColor",
+                        "ParameterAssociation": 2,
+                        "ParameterIndex": -1,
+                        "ConstantValue": null,
+                        "ScalarDefault": null,
+                        "VectorDefault": {
+                          "R": 0.0,
+                          "G": 0.0,
+                          "B": 0.0,
+                          "A": 1.0,
+                          "Hex": "000000"
+                        },
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": null
+                      }
+                    }
+                  ],
+                  "Values": [
+                    {
+                      "Key": "Swizzle",
+                      "Value": "rgb"
+                    }
+                  ],
+                  "ParameterName": null,
+                  "ParameterAssociation": -1,
+                  "ParameterIndex": 0,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": "Swizzle"
+                },
+                {
+                  "TypeName": "FMaterialUniformExpressionFoldedMath",
+                  "Operands": [
+                    {
+                      "Key": "A",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionConstant",
+                        "Operands": [],
+                        "Values": [
+                          {
+                            "Key": "Value",
+                            "Value": "FFFFFF"
+                          },
+                          {
+                            "Key": "Value Type",
+                            "Value": "4"
+                          }
+                        ],
+                        "ParameterName": null,
+                        "ParameterAssociation": -1,
+                        "ParameterIndex": 0,
+                        "ConstantValue": {
+                          "R": 1.0,
+                          "G": 1.0,
+                          "B": 1.0,
+                          "A": 0.0,
+                          "Hex": "FFFFFF"
+                        },
+                        "ScalarDefault": null,
+                        "VectorDefault": null,
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": null
+                      }
+                    },
+                    {
+                      "Key": "B",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionComponentSwizzle",
+                        "Operands": [
+                          {
+                            "Key": "X",
+                            "Value": {
+                              "TypeName": "FMaterialUniformExpressionVectorParameter",
+                              "Operands": [],
+                              "Values": [
+                                {
+                                  "Key": "Parameter",
+                                  "Value": "SelectionColor"
+                                },
+                                {
+                                  "Key": "Default",
+                                  "Value": "000000"
+                                }
+                              ],
+                              "ParameterName": "SelectionColor",
+                              "ParameterAssociation": 2,
+                              "ParameterIndex": -1,
+                              "ConstantValue": null,
+                              "ScalarDefault": null,
+                              "VectorDefault": {
+                                "R": 0.0,
+                                "G": 0.0,
+                                "B": 0.0,
+                                "A": 1.0,
+                                "Hex": "000000"
+                              },
+                              "TextureIndex": -1,
+                              "TextureLayerIndex": -1,
+                              "SamplerSource": -1,
+                              "bVirtualTexture": false,
+                              "OpName": null
+                            }
+                          }
+                        ],
+                        "Values": [
+                          {
+                            "Key": "Swizzle",
+                            "Value": "rgb"
+                          }
+                        ],
+                        "ParameterName": null,
+                        "ParameterAssociation": -1,
+                        "ParameterIndex": 0,
+                        "ConstantValue": null,
+                        "ScalarDefault": null,
+                        "VectorDefault": null,
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": "Swizzle"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    {
+                      "Key": "Op",
+                      "Value": "Add"
+                    }
+                  ],
+                  "ParameterName": null,
+                  "ParameterAssociation": -1,
+                  "ParameterIndex": 0,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": "Add"
+                }
+              ],
+              "UniformScalarExpressions": [
+                {
+                  "TypeName": "FMaterialUniformExpressionScalarParameter",
+                  "Operands": [],
+                  "Values": [
+                    {
+                      "Key": "Parameter",
+                      "Value": "RefractionDepthBias"
+                    },
+                    {
+                      "Key": "Default",
+                      "Value": "0"
+                    }
+                  ],
+                  "ParameterName": "RefractionDepthBias",
+                  "ParameterAssociation": 2,
+                  "ParameterIndex": -1,
+                  "ConstantValue": null,
+                  "ScalarDefault": 0.0,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": null
+                }
+              ],
+              "Uniform2DTextureExpressions": [],
+              "UniformCubeTextureExpressions": [],
+              "UniformVolumeTextureExpressions": [],
+              "UniformVirtualTextureExpressions": [],
+              "UniformExternalTextureExpressions": [],
+              "VTStacks": [],
+              "ParameterCollections": []
+            },
+            "UsedSceneTextures": 0,
+            "bUsesEyeAdaptation": false,
+            "bModifiesMeshPosition": false,
+            "bUsesWorldPositionOffset": false,
+            "bUsesGlobalDistanceField": false,
+            "bUsesPixelDepthOffset": false,
+            "bUsesDistanceCullFade": false,
+            "bHasRuntimeVirtualTextureOutput": false
+          },
+          "DebugDescription": "Compiling M_UI_Line-V: Platform=PCD3D_SM5, Usage=LightingModel=MSM_Unlit, BlendMode=BLEND_Translucent, SpecialEngine=0, TwoSided=0, TSNormal=1, Masked=0, Distorted=0, WritesEveryPixel=1, ModifiesMeshPosition=0, Usage={}, StaticMaterialLayers=",
+          "Shaders": [
+            {
+              "TypeName": "TSlateMaterialShaderPSDefault",
+              "MaterialParameters": null,
+              "OutputHash": "C358DDF8FDD578B3CEEE630B5AC681443B3A0565",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "C358DDF8FDD578B3CEEE630B5AC681443B3A0565",
+                "NumInstructions": 33,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSCustom",
+              "MaterialParameters": null,
+              "OutputHash": "D6FAF01AF50C67E5804F924A573486C072D58856",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "D6FAF01AF50C67E5804F924A573486C072D58856",
+                "NumInstructions": 31,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSBorder",
+              "MaterialParameters": null,
+              "OutputHash": "41460BC8EF76CBEE044A966704E86743829021A4",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "41460BC8EF76CBEE044A966704E86743829021A4",
+                "NumInstructions": 46,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 48,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 48,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderVSfalse",
+              "MaterialParameters": null,
+              "OutputHash": "005A2F3945308061F1989079EBA9FE2ECBBFC250",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 0,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 0,
+                  "Platform": 0
+                },
+                "OutputHash": "005A2F3945308061F1989079EBA9FE2ECBBFC250",
+                "NumInstructions": 17,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 64,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 64
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderVStrue",
+              "MaterialParameters": null,
+              "OutputHash": "D81D2A1D6BD67AF1CC755289B3553F59DAAFF855",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 0,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 0,
+                  "Platform": 0
+                },
+                "OutputHash": "D81D2A1D6BD67AF1CC755289B3553F59DAAFF855",
+                "NumInstructions": 17,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 64,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 64
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSFont",
+              "MaterialParameters": null,
+              "OutputHash": "35747791E46DFDAA0075601A52BC20CD1F34F0D7",
+              "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "35747791E46DFDAA0075601A52BC20CD1F34F0D7",
+                "NumInstructions": 34,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [
+                    {
+                      "BaseIndex": 0,
+                      "Size": 1
+                    }
+                  ],
+                  "SRVs": [
+                    {
+                      "BaseIndex": 0,
+                      "Size": 1
+                    }
+                  ],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            }
+          ],
+          "MeshShaderMaps": [
+            {
+              "VertexFactoryTypeName": "FLocalVertexFactory",
+              "Shaders": [
+                {
+                  "TypeName": "TTranslucencyShadowDepthVS<TranslucencyShadowDepth_PerspectiveCorrect>",
+                  "MaterialParameters": null,
+                  "OutputHash": "5C6BE31C904E8927C8FB7887395D018B06B93308",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "5C6BE31C904E8927C8FB7887395D018B06B93308",
+                    "NumInstructions": 52,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthPS<TranslucencyShadowDepth_PerspectiveCorrect>",
+                  "MaterialParameters": null,
+                  "OutputHash": "48577D53943748ADD6C3D2302D58C98691837B2A",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "48577D53943748ADD6C3D2302D58C98691837B2A",
+                    "NumInstructions": 18,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": [
+                        {
+                          "BufferIndex": 0,
+                          "BufferSize": 4,
+                          "Parameters": [
+                            {
+                              "BaseIndex": 36,
+                              "Size": 4
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthVS<TranslucencyShadowDepth_Standard>",
+                  "MaterialParameters": null,
+                  "OutputHash": "37B12E12B994B6F7DBC76030780C780E341D593C",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "37B12E12B994B6F7DBC76030780C780E341D593C",
+                    "NumInstructions": 54,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthPS<TranslucencyShadowDepth_Standard>",
+                  "MaterialParameters": null,
+                  "OutputHash": "489B4FA98813B3E67B5DB7C1D393761462F69613",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "489B4FA98813B3E67B5DB7C1D393761462F69613",
+                    "NumInstructions": 18,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": [
+                        {
+                          "BufferIndex": 0,
+                          "BufferSize": 4,
+                          "Parameters": [
+                            {
+                              "BaseIndex": 36,
+                              "Size": 4
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFSimpleNoLightmapLightingPolicySkylight",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassVSFSimpleNoLightmapLightingPolicy",
+                  "MaterialParameters": null,
+                  "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                    "NumInstructions": 141,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFSimpleNoLightmapLightingPolicy",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFNoLightMapPolicySkylight",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassVSFNoLightMapPolicy",
+                  "MaterialParameters": null,
+                  "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                    "NumInstructions": 141,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFNoLightMapPolicy",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "FConvertToUniformMeshVS",
+                  "MaterialParameters": null,
+                  "OutputHash": "D4380EAB7D6C1CB88AC599C5BFFC0EB56BB75511",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "D4380EAB7D6C1CB88AC599C5BFFC0EB56BB75511",
+                    "NumInstructions": 41,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "FConvertToUniformMeshGS",
+                  "MaterialParameters": null,
+                  "OutputHash": "25E240C91C2351702B14B1061A45FB4C2A9515F2",
+                  "MaterialShaderMapHash": "B857C03F959662D460836AEE8D1EB9FC9264F0B0",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 4,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [],
+                  "Resource": {
+                    "SpecificTypeName": "FConvertToUniformMeshGS",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 4,
+                      "Platform": 0
+                    },
+                    "OutputHash": "25E240C91C2351702B14B1061A45FB4C2A9515F2",
+                    "NumInstructions": 19,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                }
+              ]
+            }
+          ],
+          "ParsedProfile": 1
+        }
+      },
+      {
+        "LoadedShaderMap": null,
+        "LoadedShaderMapLegacy": {
+          "ShaderMapId": {
+            "QualityLevel": 1,
+            "FeatureLevel": 3,
+            "CookedShaderMapIdHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D"
+          },
+          "ShaderPlatform": "SP_PCD3D_SM5",
+          "FriendlyName": "M_UI_Line-V",
+          "MaterialCompilationOutput": {
+            "UniformExpressionSet": {
+              "UniformVectorExpressions": [
+                {
+                  "TypeName": "FMaterialUniformExpressionVectorParameter",
+                  "Operands": [],
+                  "Values": [
+                    {
+                      "Key": "Parameter",
+                      "Value": "SelectionColor"
+                    },
+                    {
+                      "Key": "Default",
+                      "Value": "000000"
+                    }
+                  ],
+                  "ParameterName": "SelectionColor",
+                  "ParameterAssociation": 2,
+                  "ParameterIndex": -1,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": {
+                    "R": 0.0,
+                    "G": 0.0,
+                    "B": 0.0,
+                    "A": 1.0,
+                    "Hex": "000000"
+                  },
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": null
+                },
+                {
+                  "TypeName": "FMaterialUniformExpressionComponentSwizzle",
+                  "Operands": [
+                    {
+                      "Key": "X",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionVectorParameter",
+                        "Operands": [],
+                        "Values": [
+                          {
+                            "Key": "Parameter",
+                            "Value": "SelectionColor"
+                          },
+                          {
+                            "Key": "Default",
+                            "Value": "000000"
+                          }
+                        ],
+                        "ParameterName": "SelectionColor",
+                        "ParameterAssociation": 2,
+                        "ParameterIndex": -1,
+                        "ConstantValue": null,
+                        "ScalarDefault": null,
+                        "VectorDefault": {
+                          "R": 0.0,
+                          "G": 0.0,
+                          "B": 0.0,
+                          "A": 1.0,
+                          "Hex": "000000"
+                        },
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": null
+                      }
+                    }
+                  ],
+                  "Values": [
+                    {
+                      "Key": "Swizzle",
+                      "Value": "rgb"
+                    }
+                  ],
+                  "ParameterName": null,
+                  "ParameterAssociation": -1,
+                  "ParameterIndex": 0,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": "Swizzle"
+                },
+                {
+                  "TypeName": "FMaterialUniformExpressionFoldedMath",
+                  "Operands": [
+                    {
+                      "Key": "A",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionConstant",
+                        "Operands": [],
+                        "Values": [
+                          {
+                            "Key": "Value",
+                            "Value": "FFFFFF"
+                          },
+                          {
+                            "Key": "Value Type",
+                            "Value": "4"
+                          }
+                        ],
+                        "ParameterName": null,
+                        "ParameterAssociation": -1,
+                        "ParameterIndex": 0,
+                        "ConstantValue": {
+                          "R": 1.0,
+                          "G": 1.0,
+                          "B": 1.0,
+                          "A": 0.0,
+                          "Hex": "FFFFFF"
+                        },
+                        "ScalarDefault": null,
+                        "VectorDefault": null,
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": null
+                      }
+                    },
+                    {
+                      "Key": "B",
+                      "Value": {
+                        "TypeName": "FMaterialUniformExpressionComponentSwizzle",
+                        "Operands": [
+                          {
+                            "Key": "X",
+                            "Value": {
+                              "TypeName": "FMaterialUniformExpressionVectorParameter",
+                              "Operands": [],
+                              "Values": [
+                                {
+                                  "Key": "Parameter",
+                                  "Value": "SelectionColor"
+                                },
+                                {
+                                  "Key": "Default",
+                                  "Value": "000000"
+                                }
+                              ],
+                              "ParameterName": "SelectionColor",
+                              "ParameterAssociation": 2,
+                              "ParameterIndex": -1,
+                              "ConstantValue": null,
+                              "ScalarDefault": null,
+                              "VectorDefault": {
+                                "R": 0.0,
+                                "G": 0.0,
+                                "B": 0.0,
+                                "A": 1.0,
+                                "Hex": "000000"
+                              },
+                              "TextureIndex": -1,
+                              "TextureLayerIndex": -1,
+                              "SamplerSource": -1,
+                              "bVirtualTexture": false,
+                              "OpName": null
+                            }
+                          }
+                        ],
+                        "Values": [
+                          {
+                            "Key": "Swizzle",
+                            "Value": "rgb"
+                          }
+                        ],
+                        "ParameterName": null,
+                        "ParameterAssociation": -1,
+                        "ParameterIndex": 0,
+                        "ConstantValue": null,
+                        "ScalarDefault": null,
+                        "VectorDefault": null,
+                        "TextureIndex": -1,
+                        "TextureLayerIndex": -1,
+                        "SamplerSource": -1,
+                        "bVirtualTexture": false,
+                        "OpName": "Swizzle"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    {
+                      "Key": "Op",
+                      "Value": "Add"
+                    }
+                  ],
+                  "ParameterName": null,
+                  "ParameterAssociation": -1,
+                  "ParameterIndex": 0,
+                  "ConstantValue": null,
+                  "ScalarDefault": null,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": "Add"
+                }
+              ],
+              "UniformScalarExpressions": [
+                {
+                  "TypeName": "FMaterialUniformExpressionScalarParameter",
+                  "Operands": [],
+                  "Values": [
+                    {
+                      "Key": "Parameter",
+                      "Value": "RefractionDepthBias"
+                    },
+                    {
+                      "Key": "Default",
+                      "Value": "0"
+                    }
+                  ],
+                  "ParameterName": "RefractionDepthBias",
+                  "ParameterAssociation": 2,
+                  "ParameterIndex": -1,
+                  "ConstantValue": null,
+                  "ScalarDefault": 0.0,
+                  "VectorDefault": null,
+                  "TextureIndex": -1,
+                  "TextureLayerIndex": -1,
+                  "SamplerSource": -1,
+                  "bVirtualTexture": false,
+                  "OpName": null
+                }
+              ],
+              "Uniform2DTextureExpressions": [],
+              "UniformCubeTextureExpressions": [],
+              "UniformVolumeTextureExpressions": [],
+              "UniformVirtualTextureExpressions": [],
+              "UniformExternalTextureExpressions": [],
+              "VTStacks": [],
+              "ParameterCollections": []
+            },
+            "UsedSceneTextures": 0,
+            "bUsesEyeAdaptation": false,
+            "bModifiesMeshPosition": false,
+            "bUsesWorldPositionOffset": false,
+            "bUsesGlobalDistanceField": false,
+            "bUsesPixelDepthOffset": false,
+            "bUsesDistanceCullFade": false,
+            "bHasRuntimeVirtualTextureOutput": false
+          },
+          "DebugDescription": "Compiling M_UI_Line-V: Platform=PCD3D_SM5, Usage=LightingModel=MSM_Unlit, BlendMode=BLEND_Translucent, SpecialEngine=0, TwoSided=0, TSNormal=1, Masked=0, Distorted=0, WritesEveryPixel=1, ModifiesMeshPosition=0, Usage={}, StaticMaterialLayers=",
+          "Shaders": [
+            {
+              "TypeName": "TSlateMaterialShaderPSDefault",
+              "MaterialParameters": null,
+              "OutputHash": "C358DDF8FDD578B3CEEE630B5AC681443B3A0565",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "C358DDF8FDD578B3CEEE630B5AC681443B3A0565",
+                "NumInstructions": 33,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSCustom",
+              "MaterialParameters": null,
+              "OutputHash": "D6FAF01AF50C67E5804F924A573486C072D58856",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "D6FAF01AF50C67E5804F924A573486C072D58856",
+                "NumInstructions": 31,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSBorder",
+              "MaterialParameters": null,
+              "OutputHash": "41460BC8EF76CBEE044A966704E86743829021A4",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "41460BC8EF76CBEE044A966704E86743829021A4",
+                "NumInstructions": 46,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 48,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 48,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderVSfalse",
+              "MaterialParameters": null,
+              "OutputHash": "005A2F3945308061F1989079EBA9FE2ECBBFC250",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 0,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 0,
+                  "Platform": 0
+                },
+                "OutputHash": "005A2F3945308061F1989079EBA9FE2ECBBFC250",
+                "NumInstructions": 17,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 64,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 64
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderVStrue",
+              "MaterialParameters": null,
+              "OutputHash": "D81D2A1D6BD67AF1CC755289B3553F59DAAFF855",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 0,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 0,
+                  "Platform": 0
+                },
+                "OutputHash": "D81D2A1D6BD67AF1CC755289B3553F59DAAFF855",
+                "NumInstructions": 17,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [],
+                  "TextureSamplers": [],
+                  "SRVs": [],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 64,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 64
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            },
+            {
+              "TypeName": "TSlateMaterialShaderPSFont",
+              "MaterialParameters": null,
+              "OutputHash": "35747791E46DFDAA0075601A52BC20CD1F34F0D7",
+              "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+              "ShaderPipelineName": "None",
+              "VertexFactoryTypeName": "None",
+              "Target": {
+                "Frequency": 3,
+                "Platform": 0
+              },
+              "PermutationId": 0,
+              "UniformBufferParameters": [],
+              "Resource": {
+                "SpecificTypeName": "None",
+                "SpecificPermutationId": 0,
+                "Target": {
+                  "Frequency": 3,
+                  "Platform": 0
+                },
+                "OutputHash": "35747791E46DFDAA0075601A52BC20CD1F34F0D7",
+                "NumInstructions": 34,
+                "ParameterMapInfo": {
+                  "UniformBuffers": [
+                    {
+                      "BaseIndex": 1,
+                      "Size": 0
+                    }
+                  ],
+                  "TextureSamplers": [
+                    {
+                      "BaseIndex": 0,
+                      "Size": 1
+                    }
+                  ],
+                  "SRVs": [
+                    {
+                      "BaseIndex": 0,
+                      "Size": 1
+                    }
+                  ],
+                  "LooseParameterBuffers": [
+                    {
+                      "BufferIndex": 0,
+                      "BufferSize": 32,
+                      "Parameters": [
+                        {
+                          "BaseIndex": 32,
+                          "Size": 16
+                        },
+                        {
+                          "BaseIndex": 64,
+                          "Size": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "bCodeInSharedLocation": true
+              }
+            }
+          ],
+          "MeshShaderMaps": [
+            {
+              "VertexFactoryTypeName": "FLocalVertexFactory",
+              "Shaders": [
+                {
+                  "TypeName": "TTranslucencyShadowDepthVS<TranslucencyShadowDepth_PerspectiveCorrect>",
+                  "MaterialParameters": null,
+                  "OutputHash": "5C6BE31C904E8927C8FB7887395D018B06B93308",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "5C6BE31C904E8927C8FB7887395D018B06B93308",
+                    "NumInstructions": 52,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthPS<TranslucencyShadowDepth_PerspectiveCorrect>",
+                  "MaterialParameters": null,
+                  "OutputHash": "48577D53943748ADD6C3D2302D58C98691837B2A",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "48577D53943748ADD6C3D2302D58C98691837B2A",
+                    "NumInstructions": 18,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": [
+                        {
+                          "BufferIndex": 0,
+                          "BufferSize": 4,
+                          "Parameters": [
+                            {
+                              "BaseIndex": 36,
+                              "Size": 4
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthVS<TranslucencyShadowDepth_Standard>",
+                  "MaterialParameters": null,
+                  "OutputHash": "37B12E12B994B6F7DBC76030780C780E341D593C",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucencyDepthPassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "37B12E12B994B6F7DBC76030780C780E341D593C",
+                    "NumInstructions": 54,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TTranslucencyShadowDepthPS<TranslucencyShadowDepth_Standard>",
+                  "MaterialParameters": null,
+                  "OutputHash": "489B4FA98813B3E67B5DB7C1D393761462F69613",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "489B4FA98813B3E67B5DB7C1D393761462F69613",
+                    "NumInstructions": 18,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": [
+                        {
+                          "BufferIndex": 0,
+                          "BufferSize": 4,
+                          "Parameters": [
+                            {
+                              "BaseIndex": 36,
+                              "Size": 4
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFSimpleNoLightmapLightingPolicySkylight",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassVSFSimpleNoLightmapLightingPolicy",
+                  "MaterialParameters": null,
+                  "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                    "NumInstructions": 141,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFSimpleNoLightmapLightingPolicy",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFNoLightMapPolicySkylight",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassVSFNoLightMapPolicy",
+                  "MaterialParameters": null,
+                  "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 2,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "2A5A9E94F5EDB4555D016140083A74126BDD3418",
+                    "NumInstructions": 141,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "TBasePassPSFNoLightMapPolicy",
+                  "MaterialParameters": {
+                    "SceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MobileSceneTexturesUniformBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    },
+                    "MaterialUniformBuffer": {
+                      "BaseIndex": 2,
+                      "bIsBound": true
+                    },
+                    "ParameterCollectionUniformBuffers": [],
+                    "NumVectorExpressions": 3,
+                    "NumScalarExpressions": 1,
+                    "Num2DTextureExpressions": 0,
+                    "NumCubeTextureExpressions": 0,
+                    "NumVolumeTextureExpressions": 0,
+                    "NumVirtualTextureExpressions": 0,
+                    "DebugDescription": "M_UI_Line-V",
+                    "PassUniformBuffer": {
+                      "BaseIndex": 1,
+                      "bIsBound": true
+                    },
+                    "VertexFactoryTypeName": "FLocalVertexFactory",
+                    "LightMapPolicyParameters": [
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      },
+                      {
+                        "BaseIndex": 0,
+                        "bIsBound": false
+                      }
+                    ],
+                    "ReflectionCaptureBuffer": {
+                      "BaseIndex": 0,
+                      "bIsBound": false
+                    }
+                  },
+                  "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 3,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FTranslucentBasePassUniformParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 3,
+                      "Platform": 0
+                    },
+                    "OutputHash": "55750C9C0F6A67F9859AF8CC1023FA228F0DB992",
+                    "NumInstructions": 53,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 2,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "FConvertToUniformMeshVS",
+                  "MaterialParameters": null,
+                  "OutputHash": "D4380EAB7D6C1CB88AC599C5BFFC0EB56BB75511",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 0,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [
+                    {
+                      "Item1": "FViewUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 0,
+                        "bIsBound": true
+                      }
+                    },
+                    {
+                      "Item1": "FLocalVertexFactoryUniformShaderParameters",
+                      "Item2": {
+                        "BaseIndex": 1,
+                        "bIsBound": true
+                      }
+                    }
+                  ],
+                  "Resource": {
+                    "SpecificTypeName": "None",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 0,
+                      "Platform": 0
+                    },
+                    "OutputHash": "D4380EAB7D6C1CB88AC599C5BFFC0EB56BB75511",
+                    "NumInstructions": 41,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [
+                        {
+                          "BaseIndex": 0,
+                          "Size": 0
+                        },
+                        {
+                          "BaseIndex": 1,
+                          "Size": 0
+                        }
+                      ],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                },
+                {
+                  "TypeName": "FConvertToUniformMeshGS",
+                  "MaterialParameters": null,
+                  "OutputHash": "25E240C91C2351702B14B1061A45FB4C2A9515F2",
+                  "MaterialShaderMapHash": "1F85002E80CFEA6DCF2372B486E65B537633A97D",
+                  "ShaderPipelineName": "None",
+                  "VertexFactoryTypeName": "FLocalVertexFactory",
+                  "Target": {
+                    "Frequency": 4,
+                    "Platform": 0
+                  },
+                  "PermutationId": 0,
+                  "UniformBufferParameters": [],
+                  "Resource": {
+                    "SpecificTypeName": "FConvertToUniformMeshGS",
+                    "SpecificPermutationId": 0,
+                    "Target": {
+                      "Frequency": 4,
+                      "Platform": 0
+                    },
+                    "OutputHash": "25E240C91C2351702B14B1061A45FB4C2A9515F2",
+                    "NumInstructions": 19,
+                    "ParameterMapInfo": {
+                      "UniformBuffers": [],
+                      "TextureSamplers": [],
+                      "SRVs": [],
+                      "LooseParameterBuffers": []
+                    },
+                    "bCodeInSharedLocation": true
+                  }
+                }
+              ]
+            }
+          ],
+          "ParsedProfile": 1
+        }
+      }
+    ]
+  },
+  {
+    "Type": "MaterialExpressionMaterialFunctionCall",
+    "Name": "MaterialExpressionMaterialFunctionCall_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionMaterialFunctionCall'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "FortniteGame/Content/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "MaterialFunction": {
+        "ObjectName": "MaterialFunction'BreakOutFloat2Components'",
+        "ObjectPath": "Engine/Content/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat2Components.0"
+      },
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "FortniteGame/Content/UI/Materials/M_UI_Line-V.0"
+      }
+    }
+  }
+]

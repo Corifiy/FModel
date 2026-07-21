@@ -1,0 +1,717 @@
+[
+  {
+    "Type": "Material",
+    "Name": "M_UI_Line-V",
+    "Flags": "RF_Public | RF_Standalone | RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'Material'",
+    "Package": "/SaveTheWorld/UI/Materials/M_UI_Line-V",
+    "Properties": {
+      "MaterialDomain": "EMaterialDomain::MD_UI",
+      "BlendMode": "EBlendMode::BLEND_Translucent",
+      "bCanMaskedBeAssumedOpaque": true,
+      "PixelDepthOffsetMode": "EPixelDepthOffsetMode::PDOM_Legacy",
+      "StateId": "10B34A80-ACFAA3ED-BEFB718B-7717FCF0",
+      "bIncludedInBaseGame": true,
+      "EmissiveColor": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionConstant3Vector'M_UI_Line-V:MaterialExpressionConstant3Vector_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.5"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionConstant3Vector_0",
+        "UseConstant": false,
+        "Constant": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 0,
+          "Hex": "000000"
+        }
+      },
+      "Opacity": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionDotProduct'M_UI_Line-V:MaterialExpressionDotProduct_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.6"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionDotProduct_0",
+        "UseConstant": false,
+        "Constant": 1.0
+      },
+      "ExpressionCollection": {
+        "Expressions": [
+          {
+            "ObjectName": "MaterialExpressionConstant3Vector'M_UI_Line-V:MaterialExpressionConstant3Vector_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.5"
+          },
+          {
+            "ObjectName": "MaterialExpressionDotProduct'M_UI_Line-V:MaterialExpressionDotProduct_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.6"
+          },
+          {
+            "ObjectName": "MaterialExpressionTextureCoordinate'M_UI_Line-V:MaterialExpressionTextureCoordinate_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.14"
+          },
+          {
+            "ObjectName": "MaterialExpressionMaterialFunctionCall'M_UI_Line-V:MaterialExpressionMaterialFunctionCall_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.7"
+          },
+          {
+            "ObjectName": "MaterialExpressionAdd'M_UI_Line-V:MaterialExpressionAdd_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.2"
+          },
+          {
+            "ObjectName": "MaterialExpressionAbs'M_UI_Line-V:MaterialExpressionAbs_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.1"
+          },
+          {
+            "ObjectName": "MaterialExpressionSubtract'M_UI_Line-V:MaterialExpressionSubtract_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.12"
+          },
+          {
+            "ObjectName": "MaterialExpressionMultiply'M_UI_Line-V:MaterialExpressionMultiply_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.8"
+          },
+          {
+            "ObjectName": "MaterialExpressionOneMinus'M_UI_Line-V:MaterialExpressionOneMinus_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.10"
+          },
+          {
+            "ObjectName": "MaterialExpressionClamp'M_UI_Line-V:MaterialExpressionClamp_0'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.3"
+          },
+          {
+            "ObjectName": "MaterialExpressionSubtract'M_UI_Line-V:MaterialExpressionSubtract_1'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.13"
+          },
+          {
+            "ObjectName": "MaterialExpressionMultiply'M_UI_Line-V:MaterialExpressionMultiply_1'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.9"
+          },
+          {
+            "ObjectName": "MaterialExpressionOneMinus'M_UI_Line-V:MaterialExpressionOneMinus_1'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.11"
+          },
+          {
+            "ObjectName": "MaterialExpressionClamp'M_UI_Line-V:MaterialExpressionClamp_1'",
+            "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.4"
+          }
+        ]
+      }
+    },
+    "LoadedMaterialResources": [],
+    "CachedExpressionData": {
+      "RuntimeEntries": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[1]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[2]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[3]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[4]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[5]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[6]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[7]": {
+        "ParameterInfoSet": []
+      },
+      "RuntimeEntries[8]": {
+        "ParameterInfoSet": []
+      },
+      "ScalarPrimitiveDataIndexValues": [],
+      "VectorPrimitiveDataIndexValues": [],
+      "ScalarValues": [],
+      "StaticSwitchValues": [],
+      "DynamicSwitchValues": [],
+      "VectorValues": [],
+      "DoubleVectorValues": [],
+      "TextureValues": [],
+      "TextureCollectionValues": [],
+      "FontValues": [],
+      "FontPageValues": [],
+      "RuntimeVirtualTextureValues": [],
+      "SparseVolumeTextureValues": [],
+      "ReferencedTextures": [],
+      "ReferencedTextureCollections": [],
+      "FunctionInfos": [
+        {
+          "StateId": "2C1DDB6E-406BC9FC-1D4141A1-7C82122A",
+          "Function": {
+            "ObjectName": "MaterialFunction'BreakOutFloat2Components'",
+            "ObjectPath": "/Engine/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat2Components.0"
+          }
+        }
+      ],
+      "FunctionInfosStateCRC": 879241666,
+      "ParameterCollectionInfos": [],
+      "GrassTypes": [],
+      "MaterialLayers": {
+        "Layers": [],
+        "Blends": [],
+        "Tree": {
+          "Nodes": [],
+          "Payloads": [],
+          "Root": -2
+        }
+      },
+      "DynamicParameterNames": [],
+      "QualityLevelsUsed": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "bHasMaterialLayers": false,
+      "bHasRuntimeVirtualTextureOutput": false,
+      "bHasSceneColor": false,
+      "bHasPerInstanceCustomData": false,
+      "bHasPerInstanceRandom": false,
+      "bHasVertexInterpolator": false,
+      "PropertyConnectedMask": 3
+    }
+  },
+  {
+    "Type": "MaterialExpressionAbs",
+    "Name": "MaterialExpressionAbs_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionAbs'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionAdd'M_UI_Line-V:MaterialExpressionAdd_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.2"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionAdd_0"
+      },
+      "MaterialExpressionEditorX": -1408,
+      "MaterialExpressionEditorY": -128,
+      "MaterialExpressionGuid": "5D54B00E-4DB82B19-CABDBABA-28C90077",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionAdd",
+    "Name": "MaterialExpressionAdd_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionAdd'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionTextureCoordinate'M_UI_Line-V:MaterialExpressionTextureCoordinate_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.14"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionTextureCoordinate_0"
+      },
+      "ConstB": -0.5,
+      "MaterialExpressionEditorX": -1568,
+      "MaterialExpressionEditorY": -128,
+      "MaterialExpressionGuid": "732FDCA5-4168679F-385060A0-F97434F7",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionClamp",
+    "Name": "MaterialExpressionClamp_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionClamp'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionOneMinus'M_UI_Line-V:MaterialExpressionOneMinus_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.10"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionOneMinus_0"
+      },
+      "MaterialExpressionEditorX": -576,
+      "MaterialExpressionEditorY": -48,
+      "MaterialExpressionGuid": "8F6DE093-4437017E-8B77938A-85898381",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionClamp",
+    "Name": "MaterialExpressionClamp_1",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionClamp'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionOneMinus'M_UI_Line-V:MaterialExpressionOneMinus_1'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.11"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionOneMinus_1"
+      },
+      "MaterialExpressionEditorX": -576,
+      "MaterialExpressionEditorY": -224,
+      "MaterialExpressionGuid": "8F6DE093-4437017E-8B77938A-85898381",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionConstant3Vector",
+    "Name": "MaterialExpressionConstant3Vector_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionConstant3Vector'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Constant": {
+        "R": 1.0,
+        "G": 1.0,
+        "B": 1.0,
+        "A": 0.0,
+        "Hex": "FFFFFF"
+      },
+      "MaterialExpressionEditorX": -352,
+      "MaterialExpressionEditorY": -288,
+      "MaterialExpressionGuid": "268193C1-45B91695-07B9B2AA-AE459D93",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      }
+    }
+  },
+  {
+    "Type": "MaterialExpressionDotProduct",
+    "Name": "MaterialExpressionDotProduct_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionDotProduct'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionClamp'M_UI_Line-V:MaterialExpressionClamp_1'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.4"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionClamp_1"
+      },
+      "B": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionClamp'M_UI_Line-V:MaterialExpressionClamp_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.3"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionClamp_0"
+      },
+      "MaterialExpressionEditorX": -368,
+      "MaterialExpressionEditorY": -128,
+      "MaterialExpressionGuid": "FF9F5B02-4A1091A6-108DB092-587622FD",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionMaterialFunctionCall",
+    "Name": "MaterialExpressionMaterialFunctionCall_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionMaterialFunctionCall'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "MaterialFunction": {
+        "ObjectName": "MaterialFunction'BreakOutFloat2Components'",
+        "ObjectPath": "/Engine/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat2Components.0"
+      },
+      "FunctionInputs": [
+        {
+          "ExpressionInputId": "0FC5C56B-4335798F-20CB928C-F1C87421",
+          "Input": {
+            "Expression": {
+              "ObjectName": "MaterialExpressionAbs'M_UI_Line-V:MaterialExpressionAbs_0'",
+              "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.1"
+            },
+            "OutputIndex": 0,
+            "InputName": "Float2",
+            "Mask": 0,
+            "MaskR": 0,
+            "MaskG": 0,
+            "MaskB": 0,
+            "MaskA": 0,
+            "ExpressionName": "MaterialExpressionAbs_0"
+          }
+        }
+      ],
+      "FunctionOutputs": [
+        {
+          "ExpressionOutputId": "6BC893C2-47FCFC56-7178CE94-4E213385",
+          "Output": {
+            "OutputName": "R",
+            "Mask": 0,
+            "MaskR": 0,
+            "MaskG": 0,
+            "MaskB": 0,
+            "MaskA": 0
+          }
+        },
+        {
+          "ExpressionOutputId": "9720C81E-449DF8E5-514FCB8A-80FD5FA3",
+          "Output": {
+            "OutputName": "G",
+            "Mask": 0,
+            "MaskR": 0,
+            "MaskG": 0,
+            "MaskB": 0,
+            "MaskA": 0
+          }
+        }
+      ],
+      "MaterialExpressionEditorX": -1280,
+      "MaterialExpressionEditorY": -128,
+      "MaterialExpressionGuid": "29AE1B79-4BA4969C-AC44EAA8-C39201BB",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "Outputs": [
+        {
+          "OutputName": "R",
+          "Mask": 0,
+          "MaskR": 0,
+          "MaskG": 0,
+          "MaskB": 0,
+          "MaskA": 0
+        },
+        {
+          "OutputName": "G",
+          "Mask": 0,
+          "MaskR": 0,
+          "MaskG": 0,
+          "MaskB": 0,
+          "MaskA": 0
+        }
+      ]
+    }
+  },
+  {
+    "Type": "MaterialExpressionMultiply",
+    "Name": "MaterialExpressionMultiply_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionMultiply'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionSubtract'M_UI_Line-V:MaterialExpressionSubtract_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.12"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionSubtract_0"
+      },
+      "ConstB": 48.0,
+      "MaterialExpressionEditorX": -864,
+      "MaterialExpressionEditorY": -48,
+      "MaterialExpressionGuid": "F88BAFBD-4CA2043D-7D4DD7A9-E9872553",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionMultiply",
+    "Name": "MaterialExpressionMultiply_1",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionMultiply'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionSubtract'M_UI_Line-V:MaterialExpressionSubtract_1'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.13"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionSubtract_1"
+      },
+      "ConstB": 8.0,
+      "MaterialExpressionEditorX": -864,
+      "MaterialExpressionEditorY": -224,
+      "MaterialExpressionGuid": "F88BAFBD-4CA2043D-7D4DD7A9-E9872553",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionOneMinus",
+    "Name": "MaterialExpressionOneMinus_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionOneMinus'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionMultiply'M_UI_Line-V:MaterialExpressionMultiply_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.8"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionMultiply_0"
+      },
+      "MaterialExpressionEditorX": -704,
+      "MaterialExpressionEditorY": -48,
+      "MaterialExpressionGuid": "AD415FBD-43BAF32C-3047B690-266C1E91",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionOneMinus",
+    "Name": "MaterialExpressionOneMinus_1",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionOneMinus'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "Input": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionMultiply'M_UI_Line-V:MaterialExpressionMultiply_1'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.9"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionMultiply_1"
+      },
+      "MaterialExpressionEditorX": -704,
+      "MaterialExpressionEditorY": -224,
+      "MaterialExpressionGuid": "AD415FBD-43BAF32C-3047B690-266C1E91",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionSubtract",
+    "Name": "MaterialExpressionSubtract_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionSubtract'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionMaterialFunctionCall'M_UI_Line-V:MaterialExpressionMaterialFunctionCall_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.7"
+        },
+        "OutputIndex": 1,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionMaterialFunctionCall_0"
+      },
+      "ConstB": 0.475,
+      "MaterialExpressionEditorX": -1024,
+      "MaterialExpressionEditorY": -48,
+      "MaterialExpressionGuid": "48BC338E-44B89622-B1BAC1B3-0AC1EFF5",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionSubtract",
+    "Name": "MaterialExpressionSubtract_1",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionSubtract'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "A": {
+        "Expression": {
+          "ObjectName": "MaterialExpressionMaterialFunctionCall'M_UI_Line-V:MaterialExpressionMaterialFunctionCall_0'",
+          "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.7"
+        },
+        "OutputIndex": 0,
+        "InputName": "None",
+        "Mask": 0,
+        "MaskR": 0,
+        "MaskG": 0,
+        "MaskB": 0,
+        "MaskA": 0,
+        "ExpressionName": "MaterialExpressionMaterialFunctionCall_0"
+      },
+      "ConstB": 0.25,
+      "MaterialExpressionEditorX": -1024,
+      "MaterialExpressionEditorY": -224,
+      "MaterialExpressionGuid": "48BC338E-44B89622-B1BAC1B3-0AC1EFF5",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      },
+      "bCollapsed": false
+    }
+  },
+  {
+    "Type": "MaterialExpressionTextureCoordinate",
+    "Name": "MaterialExpressionTextureCoordinate_0",
+    "Flags": "RF_Transactional | RF_WasLoaded | RF_LoadCompleted",
+    "Class": "UScriptClass'MaterialExpressionTextureCoordinate'",
+    "Outer": {
+      "ObjectName": "Material'M_UI_Line-V'",
+      "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+    },
+    "Properties": {
+      "MaterialExpressionEditorX": -1696,
+      "MaterialExpressionEditorY": -128,
+      "MaterialExpressionGuid": "55881A2C-478E3944-8A662090-7C255827",
+      "Material": {
+        "ObjectName": "Material'M_UI_Line-V'",
+        "ObjectPath": "/SaveTheWorld/UI/Materials/M_UI_Line-V.0"
+      }
+    }
+  }
+]
