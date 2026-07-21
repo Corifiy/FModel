@@ -116,11 +116,15 @@ public static class PixelShaderDecompiler
         // every node reached more than once across the whole shader is hoisted into a named
         // declaration up front, in dependency order, and every other reference to it becomes just
         // that name - this is a straightforward CSE pass over the DAG, not a rewrite of it.
-        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material));
+        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel);
         var recursed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
                 CountRefs(root, ctx, recursed);
+
+        if (wiring.PinExpressions.TryGetValue("Normal", out var normalRoot) && TryGetGBufferNormalEncodeInput(normalRoot, out var normalInput))
+            ctx.PixelNormalWsNode = normalInput;
+        ScanForTangentBasis(wiring, ctx);
 
         var named = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
@@ -234,11 +238,12 @@ public static class PixelShaderDecompiler
     /// shared) expression DAG so a subtree reached from many places is declared once and referenced
     /// by name everywhere else, instead of being fully re-expanded at every occurrence.
     /// </summary>
-    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures)
+    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures, ERHIFeatureLevel featureLevel)
     {
         public readonly UMaterialInterface Material = material;
         public readonly FUniformExpressionSetLegacy ExpressionSet = expressionSet;
         public readonly IReadOnlyList<UTexture?>? ReferencedTextures = referencedTextures;
+        public readonly ERHIFeatureLevel FeatureLevel = featureLevel;
         public readonly MaterialShaderDecompiler.InstanceParameterOverrides Overrides = MaterialShaderDecompiler.InstanceParameterOverrides.Build(material);
         public readonly Dictionary<int, MaterialParameterCollectionResolver.ResolvedCollection?> CollectionCache = new();
         public readonly Dictionary<int, int> LeftoverCbRegisterToCollectionIndex = new();
@@ -246,6 +251,18 @@ public static class PixelShaderDecompiler
         public readonly Dictionary<PixelExpressionNode, string> Names = new(ReferenceEqualityComparer.Instance);
         public readonly HashSet<string> UsedNames = new(StringComparer.Ordinal);
         public readonly List<string> Declarations = [];
+        /// <summary>The node feeding the "Normal" output pin's *0.5+0.5 GBuffer encode, i.e. exactly
+        /// Parameters.WorldNormal / the PixelNormalWS material expression's value - set once per
+        /// resource by DecompileOneResource before AssignNames runs, null if that pin isn't wired or
+        /// doesn't have the expected shape.</summary>
+        public PixelExpressionNode? PixelNormalWsNode;
+        /// <summary>The three nodes recovered from the TBN (tangent/bitangent/normal) basis
+        /// reconstruction (see TryMatchBitangent) - the two raw vertex interpolants (TangentToWorld0/
+        /// TangentToWorld2) and the derived cross-product node, found once per resource by a
+        /// dedicated pre-pass before AssignNames runs, all null if the shape isn't present.</summary>
+        public PixelExpressionNode? TangentNode;
+        public PixelExpressionNode? VertexNormalNode;
+        public PixelExpressionNode? BitangentNode;
         public int NextId;
     }
 
@@ -259,9 +276,11 @@ public static class PixelShaderDecompiler
 
     /// <summary>
     /// Post-order: declares every node with more than one incoming reference, children before
-    /// parents, PLUS every texture "sample" node unconditionally - even one used only once is worth
-    /// naming after the texture it reads (e.g. "Pattern_HeavyArrows") rather than leaving readers to
-    /// spot the identity buried in a trailing comment at its point of use.
+    /// parents, PLUS every texture "sample" node and every recognized semantic idiom (Camera Vector,
+    /// Pixel Normal WS, the translated-world-position reconstruction they're built from)
+    /// unconditionally - even one used only once is worth naming meaningfully (e.g.
+    /// "Pattern_HeavyArrows", "CameraVector") rather than leaving readers to spot the identity buried
+    /// in a trailing comment, or worse, unlabeled math, at its point of use.
     /// </summary>
     private static void AssignNames(PixelExpressionNode node, PrintCtx ctx, HashSet<PixelExpressionNode> visited)
     {
@@ -269,7 +288,13 @@ public static class PixelShaderDecompiler
         foreach (var arg in node.Args) AssignNames(arg.Node, ctx, visited);
         if (ctx.Names.ContainsKey(node)) return;
 
-        var forceHoist = node.Op == "sample";
+        var forceHoist = node.Op == "sample"
+            || ReferenceEquals(node, ctx.PixelNormalWsNode)
+            || ReferenceEquals(node, ctx.TangentNode)
+            || ReferenceEquals(node, ctx.VertexNormalNode)
+            || ReferenceEquals(node, ctx.BitangentNode)
+            || IsCameraVectorNode(node, ctx)
+            || IsTranslatedWorldPositionDivide(node, ctx);
         if (!forceHoist)
         {
             if (ctx.RefCounts.GetValueOrDefault(node) <= 1) return;
@@ -281,10 +306,19 @@ public static class PixelShaderDecompiler
         // "_N", never "tN"/"vN"/"rN"/etc: those single-letter prefixes are the actual DXBC register
         // classes (t# texture/SRV, v# input, r# temp, o# output - see PrintNodeInner/PrintArg), and
         // some of them legitimately appear inside Detail strings (e.g. "sample_l - t1 (engine
-        // resource)" names real register t1). An "_N" name can never collide with those.
-        var name = forceHoist && TryGetSampleTextureName(node, ctx, out var textureName)
-            ? MakeUniqueName(textureName, ctx)
-            : $"_{ctx.NextId++}";
+        // resource)" names real register t1). An "_N" name can never collide with those. Also never
+        // "Normal" (bare): that's the literal identifier the "Normal" *output pin* assignment already
+        // uses, so the vertex-interpolant normal is named "VertexNormal" instead to avoid colliding
+        // with it.
+        string name;
+        if (ReferenceEquals(node, ctx.PixelNormalWsNode)) name = MakeUniqueName("PixelNormalWS", ctx);
+        else if (ReferenceEquals(node, ctx.TangentNode)) name = MakeUniqueName("Tangent", ctx);
+        else if (ReferenceEquals(node, ctx.VertexNormalNode)) name = MakeUniqueName("VertexNormal", ctx);
+        else if (ReferenceEquals(node, ctx.BitangentNode)) name = MakeUniqueName("Bitangent", ctx);
+        else if (IsCameraVectorNode(node, ctx)) name = MakeUniqueName("CameraVector", ctx);
+        else if (IsTranslatedWorldPositionDivide(node, ctx)) name = MakeUniqueName("WorldPosition_CamRelative", ctx);
+        else if (TryGetSampleTextureName(node, ctx, out var textureName)) name = MakeUniqueName(textureName, ctx);
+        else name = $"_{ctx.NextId++}";
         ctx.UsedNames.Add(name);
         ctx.Names[node] = name; // set before printing the body in case a node ever referenced itself
         ctx.Declarations.Add($"var {name} = {PrintNodeBody(node, ctx)};");
@@ -308,6 +342,185 @@ public static class PixelShaderDecompiler
         if (resolved == null) return false;
         name = resolved;
         return true;
+    }
+
+    /// <summary>
+    /// UE's deferred GBuffer always encodes the Normal output pin as Normal*0.5+0.5
+    /// (confirmed consistently across every material decompiled this session, both here and in
+    /// MaterialTemplate.ush's own GBuffer-encode convention) - if the pin's root matches that exact
+    /// "mad" shape, its first argument is the material's raw (unencoded) world-space normal, i.e.
+    /// exactly Parameters.WorldNormal / the PixelNormalWS material expression's value
+    /// (HLSLMaterialTranslator.h PixelNormalWS(): "return AddInlinedCodeChunk(MCT_Float3,
+    /// TEXT(\"Parameters.WorldNormal\"))").
+    /// </summary>
+    private static bool TryGetGBufferNormalEncodeInput(PixelExpressionNode normalPinRoot, out PixelExpressionNode input)
+    {
+        input = normalPinRoot;
+        if (normalPinRoot.Op != "mad" || normalPinRoot.Args.Count != 3) return false;
+        if (normalPinRoot.Args[1].Node.Op != "imm" || normalPinRoot.Args[2].Node.Op != "imm") return false;
+        if (!IsHalfConstant(normalPinRoot.Args[1].Node) || !IsHalfConstant(normalPinRoot.Args[2].Node)) return false;
+        input = normalPinRoot.Args[0].Node;
+        return true;
+    }
+
+    private static bool IsHalfConstant(PixelExpressionNode imm) =>
+        imm.Constants is { Length: >= 3 } c && MathF.Abs(c[0] - 0.5f) < 0.001f && MathF.Abs(c[1] - 0.5f) < 0.001f && MathF.Abs(c[2] - 0.5f) < 0.001f;
+
+    /// <summary>
+    /// Recognizes Parameters.WorldPosition_CamRelative's exact compiled shape: a perspective divide
+    /// (Y / Y.w) of a mad-chain built from one of the four SV_Position/NDC -> translated-world
+    /// reconstruction matrices (SVPositionToTranslatedWorld / ScreenToWorld / ScreenToTranslatedWorld
+    /// / ClipToTranslatedWorld - different pipeline paths pick different ones; MaterialTemplate.ush:
+    /// "TranslatedWorldPosition is the world position translated to the camera position"). Confirmed
+    /// via those matrices' real engine row identity (EngineUniformBufferLayout), not by the
+    /// div-of-self shape alone - a div-of-self that *isn't* built from one of these four matrices
+    /// never matches, so this can't mislabel an unrelated homogeneous divide.
+    /// </summary>
+    private static readonly HashSet<string> PositionReconstructionMatrixNames = new(StringComparer.Ordinal)
+    {
+        "SVPositionToTranslatedWorld", "ScreenToWorld", "ScreenToTranslatedWorld", "ClipToTranslatedWorld",
+    };
+
+    private static bool IsTranslatedWorldPositionDivide(PixelExpressionNode node, PrintCtx ctx)
+    {
+        if (node.Op != "div" || node.Args.Count != 2) return false;
+        if (!ReferenceEquals(node.Args[0].Node, node.Args[1].Node)) return false;
+        if (node.Args[1].Swizzle.Length == 0 || node.Args[1].Swizzle.Any(c => c != 'w')) return false;
+        return ContainsPositionMatrixRow(node.Args[0].Node, ctx, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+    }
+
+    private static bool ContainsPositionMatrixRow(PixelExpressionNode node, PrintCtx ctx, HashSet<PixelExpressionNode> visited)
+    {
+        if (!visited.Add(node)) return false;
+        if (IsPositionReconstructionMatrixRow(node, ctx)) return true;
+        if (node.Op != "add" && node.Op != "mul") return false; // only descend through the mad-chain shape itself, not arbitrary math
+        foreach (var arg in node.Args)
+            if (ContainsPositionMatrixRow(arg.Node, ctx, visited)) return true;
+        return false;
+    }
+
+    private static bool IsPositionReconstructionMatrixRow(PixelExpressionNode node, PrintCtx ctx)
+    {
+        if (node.Op != "cbrow" || node.Source != null) return false; // Source set = Material's own buffer, not View
+        if (!TryDescribeEngineBufferRow(node.Detail, ctx, out var resolved)) return false;
+        var dot = resolved.IndexOf('.');
+        var fieldName = dot >= 0 ? resolved[(dot + 1)..] : resolved;
+        return PositionReconstructionMatrixNames.Contains(fieldName);
+    }
+
+    /// <summary>
+    /// Recognizes Parameters.CameraVector's exact compiled shape (MaterialTemplate.ush:2120:
+    /// "Parameters.CameraVector = normalize(-Parameters.WorldPosition_CamRelative.xyz)" - the
+    /// engine's own comment there: "TranslatedWorldPosition is the world position translated to the
+    /// camera position, which is just -CameraVector"): normalize(-X) where X is confirmed (via
+    /// IsTranslatedWorldPositionDivide) to be that exact translated-world-position reconstruction,
+    /// not just any normalize(-something) - a light direction or other vector negated then
+    /// normalized would not match, since it never passes IsTranslatedWorldPositionDivide's
+    /// matrix-row check.
+    /// </summary>
+    private static bool IsCameraVectorNode(PixelExpressionNode node, PrintCtx ctx)
+    {
+        if (node.Op != "mul" || node.Args.Count != 2) return false;
+        PixelExpressionArg? rsqrtArg = null, negArg = null;
+        foreach (var arg in node.Args)
+        {
+            if (arg.Node.Op == "rsq") rsqrtArg = arg;
+            else if (arg.Negate) negArg = arg;
+        }
+        if (rsqrtArg == null || negArg == null) return false;
+        if (rsqrtArg.Node.Args.Count != 1 || rsqrtArg.Node.Args[0].Node.Op != "dp3") return false;
+        var dotArgs = rsqrtArg.Node.Args[0].Node.Args;
+        if (dotArgs.Count != 2 || !ReferenceEquals(dotArgs[0].Node, negArg.Node) || !ReferenceEquals(dotArgs[1].Node, negArg.Node))
+            return false;
+        return IsTranslatedWorldPositionDivide(negArg.Node, ctx);
+    }
+
+    /// <summary>
+    /// Matches cross(A, B) in the exact 3-instruction shape the analyzer decodes a full vectorized
+    /// cross product into: mad(A.yzx, B.zxy, -mul(B.yzx, A.zxy)) - component 0 = A.y*B.z - A.z*B.y
+    /// (= cross.x), and so on for all 3 lanes simultaneously. This is the only way to express a
+    /// complete 3-component cross product as one SIMD swizzle/mad/mul triple, not one arbitrary
+    /// rotation among several - so matching "yzx"/"zxy" literally isn't narrower than the real
+    /// instruction shape.
+    /// </summary>
+    private static bool TryMatchCrossProduct(PixelExpressionNode node, out PixelExpressionNode a, out PixelExpressionNode b)
+    {
+        a = b = null!;
+        if (node.Op != "mad" || node.Args.Count != 3) return false;
+        var arg0 = node.Args[0];
+        var arg1 = node.Args[1];
+        var arg2 = node.Args[2];
+        if (arg0.Swizzle != "yzx" || arg1.Swizzle != "zxy") return false;
+        if (!arg2.Negate || arg2.Node.Op != "mul" || arg2.Node.Args.Count != 2) return false;
+        var m0 = arg2.Node.Args[0];
+        var m1 = arg2.Node.Args[1];
+        var matches = (m0.Swizzle == "yzx" && ReferenceEquals(m0.Node, arg1.Node) && m1.Swizzle == "zxy" && ReferenceEquals(m1.Node, arg0.Node))
+                   || (m1.Swizzle == "yzx" && ReferenceEquals(m1.Node, arg1.Node) && m0.Swizzle == "zxy" && ReferenceEquals(m0.Node, arg0.Node));
+        if (!matches) return false;
+        a = arg0.Node;
+        b = arg1.Node;
+        return true;
+    }
+
+    /// <summary>
+    /// Recognizes the reconstructed Bitangent (TangentToWorld1) exactly as
+    /// MaterialTemplate.ush's AssembleTangentToWorld computes it: "half3 TangentToWorld1 =
+    /// cross(TangentToWorld2.xyz, TangentToWorld0) * TangentToWorld2.w" - a cross product (matched
+    /// structurally via TryMatchCrossProduct, not assumed) of the two raw vertex interpolants,
+    /// scaled by the SAME node used as the cross product's first operand, read again with a bare
+    /// ".w"/".www" broadcast swizzle (TangentToWorld2's handedness sign) - confirmed against
+    /// GpuSkinVertexFactory.ush's CalcTangentToWorld, which packs Tangent into TangentToWorld0 and
+    /// Normal (+ sign in .w) into TangentToWorld2. Deliberately does not assume which TEXCOORD
+    /// register carries which - interpolator slot assignment is compiler-packed per material, not a
+    /// fixed struct offset, so identifying Tangent/Normal by their structural role here (not by a
+    /// hardcoded TEXCOORD index) is what keeps this from being a guess for a different material.
+    /// </summary>
+    private static bool TryMatchBitangent(PixelExpressionNode node, out PixelExpressionNode normalNode, out PixelExpressionNode tangentNode)
+    {
+        normalNode = tangentNode = null!;
+        if (node.Op != "mul" || node.Args.Count != 2) return false;
+        PixelExpressionArg? crossArg = null;
+        PixelExpressionArg? scaleArg = null;
+        PixelExpressionNode? crossA = null, crossB = null;
+        foreach (var arg in node.Args)
+        {
+            if (TryMatchCrossProduct(arg.Node, out var a, out var b)) { crossArg = arg; crossA = a; crossB = b; }
+            else scaleArg = arg;
+        }
+        if (crossArg == null || scaleArg == null || crossA == null || crossB == null) return false;
+        if (!ReferenceEquals(scaleArg.Node, crossA)) return false; // scale must be the cross product's own first operand (TangentToWorld2 = Normal)
+        if (scaleArg.Swizzle.Length == 0 || scaleArg.Swizzle.Any(c => c != 'w')) return false;
+        normalNode = crossA;
+        tangentNode = crossB;
+        return true;
+    }
+
+    /// <summary>
+    /// One-time pre-pass (before AssignNames runs) that walks every pin's expression DAG looking for
+    /// the Bitangent shape TryMatchBitangent recognizes, seeding PrintCtx's Tangent/VertexNormal/
+    /// Bitangent node references on the first match found. A material with no tangent-space normal
+    /// map (and so no TBN reconstruction at all) simply leaves all three null - nothing gets
+    /// mislabeled.
+    /// </summary>
+    private static void ScanForTangentBasis(PixelShaderWiring wiring, PrintCtx ctx)
+    {
+        var visited = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        bool Scan(PixelExpressionNode node)
+        {
+            if (!visited.Add(node)) return false;
+            if (TryMatchBitangent(node, out var normalNode, out var tangentNode))
+            {
+                ctx.BitangentNode = node;
+                ctx.VertexNormalNode = normalNode;
+                ctx.TangentNode = tangentNode;
+                return true;
+            }
+            foreach (var arg in node.Args)
+                if (Scan(arg.Node)) return true;
+            return false;
+        }
+        foreach (var root in wiring.PinExpressions.Values)
+            if (Scan(root)) return;
     }
 
     /// <summary>Disambiguates a candidate name against every name already handed out this shader (e.g. the same texture sampled twice at different UVs).</summary>
@@ -447,6 +660,61 @@ public static class PixelShaderDecompiler
         return true;
     }
 
+    /// <summary>
+    /// Resolves a read from the two fixed, engine-wide uniform buffers every base-pass pixel shader
+    /// binds (View, Primitive) using EngineUniformBufferLayout - a row/component table derived from
+    /// the real, hardcoded C++ struct layout (SceneView.h/PrimitiveUniformShaderParameters.h), not
+    /// this material's own data, so it applies identically to every material *compiled against that
+    /// same struct revision*. Detail is built by MaterialPixelShaderAnalyzer.cs (~line 2286) as the
+    /// literal "{bufferName} cb{Index0}[{row}]" whenever the bound buffer's name is known - the row
+    /// this node represents is always a FULL, unswizzled row (any .x/.y/.z/.w selection happens
+    /// separately, at the reference site - see PrintArg), so a row where every component names the
+    /// same field (a vector/matrix row) can be printed directly; a row that packs several unrelated
+    /// scalars (one per component) can't collapse to one name without guessing which the caller's own
+    /// swizzle will pick, so all of them are shown instead - the same "don't guess the swizzle" rule
+    /// TryDescribeCollectionRow's scalar branch already follows for Parameter Collection rows.
+    ///
+    /// Gated to SM5 only: a real ERHIFeatureLevel.SM4_REMOVED resource in this same cooked material
+    /// (M_FN_Character_MASTER, Quality=Medium) showed every one of several independently-verified
+    /// rows (PreViewTranslation, the SVPositionToTranslatedWorld reconstruction matrix,
+    /// NormalOverrideParameter, the GameTime-driven sin-pulse row) shifted by exactly 4 rows (one
+    /// whole FMatrix) versus this table - i.e. this table is only confirmed to match the SM5 cbuffer
+    /// layout. Rather than guess which of the ~10 leading matrices SM4's struct is missing (would need
+    /// a period-correct engine source snapshot this session doesn't have), any non-SM5 feature level
+    /// falls through to the existing honest "cb{N}[{row}]" placeholder instead of a confidently wrong
+    /// name.
+    /// </summary>
+    private static readonly Regex EngineBufferCbPattern = new(@"^(?<buf>[A-Za-z0-9_]+) cb\d+\[(?<row>\d+)\]$", RegexOptions.Compiled);
+
+    private static bool TryDescribeEngineBufferRow(string? detail, PrintCtx ctx, out string result)
+    {
+        result = "";
+        if (string.IsNullOrEmpty(detail) || ctx.FeatureLevel != ERHIFeatureLevel.SM5) return false;
+        var match = EngineBufferCbPattern.Match(detail);
+        if (!match.Success) return false;
+
+        var bufferName = match.Groups["buf"].Value;
+        var row = int.Parse(match.Groups["row"].Value);
+        var (prefix, table) = bufferName switch
+        {
+            "FViewUniformShaderParameters" => ("View", EngineUniformBufferLayout.ViewRows),
+            "FPrimitiveUniformShaderParameters" => ("Primitive", EngineUniformBufferLayout.PrimitiveRows),
+            _ => (null, null),
+        };
+        if (table == null || !table.TryGetValue(row, out var comps)) return false;
+
+        var distinctNames = comps.Where(c => c != null).Distinct().ToList();
+        if (distinctNames.Count <= 1)
+        {
+            if (distinctNames.Count == 0) return false;
+            result = $"{prefix}.{distinctNames[0]}";
+            return true;
+        }
+        var names = string.Join(", ", "xyzw".Select((c, i) => $"{c}={comps[i] ?? "?"}"));
+        result = $"{prefix}.Row{row} /* {names} */";
+        return true;
+    }
+
     private static string PrintNodeBody(PixelExpressionNode node, PrintCtx ctx)
     {
         var expr = PrintNodeInner(node, ctx);
@@ -468,6 +736,7 @@ public static class PixelShaderDecompiler
                 // MaterialPixelShaderAnalyzer.cs ~line 2286).
                 if (node.Source is { } cbSource) return DescribeSource(cbSource, ctx);
                 if (TryDescribeParameterCollectionRead(node.Detail, ctx, out var mpcRead)) return mpcRead;
+                if (TryDescribeEngineBufferRow(node.Detail, ctx, out var engineRead)) return engineRead;
                 return string.IsNullOrEmpty(node.Detail) ? "/* unresolved constant buffer read */ 0" : $"/* {node.Detail} */ 0";
             case "sample":
                 return $"{node.Detail}({string.Join(", ", node.Args.Select(a => PrintArg(a, ctx)))})" +
@@ -503,7 +772,7 @@ public static class PixelShaderDecompiler
             "add" or "iadd" => $"({Arg(0)} + {Arg(1)})",
             "mul" or "imul" or "umul" => $"({Arg(0)} * {Arg(1)})",
             "div" or "udiv" => $"({Arg(0)} / {Arg(1)})",
-            "mad" or "imad" or "umad" => $"({Arg(0)} * {Arg(1)} + {Arg(2)})",
+            "mad" or "imad" or "umad" => TryMatchLerp(node, ctx, out var lerpResult) ? lerpResult : $"({Arg(0)} * {Arg(1)} + {Arg(2)})",
             "dp2" => $"dot2({Arg(0)}, {Arg(1)})",
             "dp3" => $"dot3({Arg(0)}, {Arg(1)})",
             "dp4" => $"dot4({Arg(0)}, {Arg(1)})",
@@ -585,6 +854,42 @@ public static class PixelShaderDecompiler
         var swizzle = "xyzw"[..append.Args.Count];
         result = $"({PrintArg(condition, ctx)} ? {Ref(thenNode, ctx)}.{swizzle} : {Ref(elseNode, ctx)}.{swizzle})";
         return true;
+    }
+
+    /// <summary>
+    /// Recognizes HLSL's lerp(a,b,t) intrinsic in its compiled form - mad(t, b-a, a), the standard
+    /// identity lerp(a,b,t) = a + t*(b-a) (checked with either mad-operand order, since
+    /// multiplication is commutative and the compiler is free to pick either) - and prints it as
+    /// lerp(a, b, t) instead of the fully expanded arithmetic. This is a provable mathematical
+    /// identity, not a claim about which material-graph node produced it: a + t*(b-a) literally IS
+    /// lerp(a,b,t) by definition, whether the graph used a dedicated Lerp node or hand-built the
+    /// same math from Add/Subtract/Multiply - so this can never mislabel anything, only ever print a
+    /// shorter, exactly equivalent expression. Deliberately conservative: requires the subtraction to
+    /// carry no swizzle/negate/abs of its own and "a" to appear completely unmodified in both places
+    /// (same node, same swizzle, no negate/abs) - anything less exact is left as the fully expanded
+    /// form rather than guessed at.
+    /// </summary>
+    private static bool TryMatchLerp(PixelExpressionNode node, PrintCtx ctx, out string result)
+    {
+        result = "";
+        if (node.Op != "mad" || node.Args.Count != 3) return false;
+        var addend = node.Args[2];
+        if (addend.Negate || addend.Absolute) return false;
+
+        foreach (var (subArg, tArg) in new[] { (node.Args[1], node.Args[0]), (node.Args[0], node.Args[1]) })
+        {
+            if (subArg.Negate || subArg.Absolute || subArg.Swizzle.Length > 0) continue;
+            if (subArg.Node.Op != "add" || subArg.Node.Args.Count != 2) continue;
+            var s0 = subArg.Node.Args[0];
+            var s1 = subArg.Node.Args[1];
+            PixelExpressionArg? bArg = null;
+            if (s0.Negate && !s0.Absolute && ReferenceEquals(s0.Node, addend.Node) && s0.Swizzle == addend.Swizzle) bArg = s1;
+            else if (s1.Negate && !s1.Absolute && ReferenceEquals(s1.Node, addend.Node) && s1.Swizzle == addend.Swizzle) bArg = s0;
+            if (bArg == null) continue;
+            result = $"lerp({PrintArg(addend, ctx)}, {PrintArg(bArg, ctx)}, {PrintArg(tArg, ctx)})";
+            return true;
+        }
+        return false;
     }
 
     private static bool IsIdentityComponent(PixelExpressionArg edge, int position)

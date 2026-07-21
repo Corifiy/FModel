@@ -49,6 +49,31 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     Console.WriteLine(pixelShader ?? "(null - no legacy shader map / no pixel shader analysis)");
 
     Console.WriteLine();
+    Console.WriteLine($"----- All LoadedMaterialResources ({material.LoadedMaterialResources.Count}) -----");
+    foreach (var r in material.LoadedMaterialResources)
+    {
+        if (r.LoadedShaderMapLegacy is { } sm)
+            Console.WriteLine($"  Quality={sm.ShaderMapId.QualityLevel} FeatureLevel={sm.ShaderMapId.FeatureLevel} Platform={sm.ShaderPlatform} (LoadedShaderMapLegacy present)");
+        else
+            Console.WriteLine($"  LoadedShaderMapLegacy=null LoadedShaderMap={(r.LoadedShaderMap != null ? "present" : "null")}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Vertex factory of every TBasePassPS* shader (top-level vs. per-VF) -----");
+    foreach (var r in material.LoadedMaterialResources)
+    {
+        if (r.LoadedShaderMapLegacy is not { } sm) continue;
+        Console.WriteLine($"  Quality={sm.ShaderMapId.QualityLevel}:");
+        foreach (var s in sm.Shaders)
+            if (s.TypeName.StartsWith("TBasePassPS", StringComparison.Ordinal))
+                Console.WriteLine($"    top-level (no VF): {s.TypeName}");
+        foreach (var meshMap in sm.MeshShaderMaps)
+            foreach (var s in meshMap.Shaders)
+                if (s.TypeName.StartsWith("TBasePassPS", StringComparison.Ordinal))
+                    Console.WriteLine($"    VF={meshMap.VertexFactoryTypeName}: {s.TypeName}");
+    }
+
+    Console.WriteLine();
     Console.WriteLine("----- Sample node ChannelMap diagnostics -----");
     if (PixelShaderDecompiler.AnalyzeForDiagnostics(material) is { } diag && diag.Wiring.Success)
     {
@@ -71,6 +96,27 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     else
     {
         Console.WriteLine("  (no wiring)");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Raw DAG dump for the Normal pin (structure of the TBN reconstruction) -----");
+    if (PixelShaderDecompiler.AnalyzeForDiagnostics(material) is { } diagRaw && diagRaw.Wiring.Success
+        && diagRaw.Wiring.PinExpressions.TryGetValue("Normal", out var normalRoot))
+    {
+        var ids = new Dictionary<PixelExpressionNode, int>(ReferenceEqualityComparer.Instance);
+        var nextId = 0;
+        int IdOf(PixelExpressionNode n) => ids.TryGetValue(n, out var i) ? i : ids[n] = nextId++;
+        var printed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        void Dump(PixelExpressionNode node, int depth)
+        {
+            var id = IdOf(node);
+            var argsDesc = string.Join(", ", node.Args.Select(a => $"[{IdOf(a.Node)}]{(a.Negate ? " neg" : "")}{(a.Absolute ? " abs" : "")} swz='{a.Swizzle}'"));
+            Console.WriteLine($"{new string(' ', depth * 2)}#{id} op={node.Op} Detail='{node.Detail}' Source={node.Source} args=[{argsDesc}]");
+            if (!printed.Add(node)) { Console.WriteLine($"{new string(' ', (depth + 1) * 2)}(already printed above)"); return; }
+            if (depth > 12) return;
+            foreach (var arg in node.Args) Dump(arg.Node, depth + 1);
+        }
+        Dump(normalRoot, 0);
     }
 
     Console.WriteLine();

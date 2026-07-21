@@ -396,6 +396,217 @@ defaults defeats the purpose, so this was fixed rather than left as a known gap:
   `M_FN_Character_MASTER` (a plain `UMaterial`, no instance chain) afterward to confirm zero
   regression: output byte-identical to before this change, including the MPC resolution above.
 
+### Engine uniform buffer (View/Primitive) row identification - "Camera Vector", "Pixel Normal WS", etc.
+
+Requested after the user asked how to recognize common material-graph concepts like "Camera Vector"
+or "Pixel Normal WS" in the decompiled output. Until this point, every read from the View or
+Primitive uniform buffer that wasn't the material's own data printed as an opaque placeholder, e.g.
+`/* FViewUniformShaderParameters cb0[66] */ 0` - the buffer *name* resolved fine (a different path,
+via `shader.UniformBufferParameters`), but the row number inside it was untouched.
+
+- **Key realization, confirmed against engine source, not assumed**: unlike a material's own
+  parameters or a Parameter Collection (both per-asset data with no fixed layout),
+  `FViewUniformShaderParameters` and `FPrimitiveUniformShaderParameters` are literally hardcoded C++
+  structs (`Engine/Public/SceneView.h`'s `VIEW_UNIFORM_BUFFER_MEMBER_TABLE`,
+  `Engine/Public/PrimitiveUniformShaderParameters.h`), the same for every shader that binds them - so
+  their row layout is fully determined by their own field declaration order, not anything
+  material-specific.
+- **The exact packing rule was read from engine source, not guessed**:
+  `RenderCore/Private/ShaderParameters.cpp`'s `CreateHLSLUniformBufferStructMembersDeclaration` shows
+  the HLSL row of a member is its real C++ `STRUCT_OFFSET` (`Member.GetOffset()`); each field's
+  required alignment is likewise confirmed per-type from `TShaderParameterTypeInfo<T>::Alignment`
+  (`RenderCore/Public/ShaderParameterMacros.h`): `float`/`int32`/`uint32`/`bool` = 4,
+  `FVector2D` = 8, `FVector`/`FVector4`/`FLinearColor`/`FMatrix` = 16 (a `FMatrix` always spans
+  exactly 4 full rows, each 16-byte aligned; an array's elements are each 16-byte aligned, so an
+  array element never shares a row with anything else). Given the field list and these alignments,
+  standard C struct packing (each field starts at the next offset that's a multiple of its own
+  alignment) determines every row/component exactly - meaning a lone scalar like `MaterialTextureMipBias`
+  can end up sharing a row with unrelated neighbors declared right after it (row 137 packs
+  `DeltaTime`/`MaterialTextureMipBias`/`MaterialTextureDerivativeMultiply`/`Random` into
+  `.x`/`.y`/`.z`/`.w`), while a 16-byte-aligned `FVector`/`FVector4` claims a row (or, for `FVector`'s
+  true 12-byte size, up to 3 of its components) by itself.
+- **Computed with a script, not by hand**: transcribed the full ~130-field `VIEW_UNIFORM_BUFFER_MEMBER_TABLE`
+  (171 rows total) and the smaller `FPrimitiveUniformShaderParameters` field list (26 rows), then
+  wrote a small Python script (`layout.py`) to apply the alignment rule above and compute every
+  field's exact (row, component) - deliberately not done by hand, since a single arithmetic slip
+  partway through 130+ fields would silently misalign everything after it. The script asserts no two
+  fields ever claim the same component (caught and fixed one real bug this way mid-session: a naive
+  first draft let a second `FVector2D` sharing a row silently overwrite the first one's components -
+  `FieldOfViewWideAngles`/`PrevFieldOfViewWideAngles` at row 124).
+- **Cross-checked against real compiled output before being trusted for a single row** - not just
+  derived in the abstract: on `M_FN_Character_MASTER`'s actual decompiled pixel shader,
+  - row 44-47 is read as a 4-row matrix multiplied against `SV_Position` and divided by `.w` - exactly
+    the `SVPositionToTranslatedWorld` reconstruction idiom.
+  - row 66 is subtracted from a world-space vertex interpolator - exactly what `PreViewTranslation`
+    (translated-world → true world) is for.
+  - rows 130/131/132 each blend into diffuse/specular/normal computation right where
+    `Diffuse`/`Specular`/`NormalOverrideParameter` (debug view-mode overrides) would.
+  - row 139 multiplies the entire lit-emissive expression - exactly `UnlitViewmodeMask`'s role.
+  - row 137's second component feeds a biased texture sample's LOD-bias argument - exactly
+    `MaterialTextureMipBias`.
+  - Primitive row 19 (`ObjectBounds`) and row 5 (`ObjectWorldPositionAndRadius`) combine as
+    `abs(WorldPos - Center) < (HalfExtents + 1)` - a textbook "is this pixel inside the object's
+    (expanded) bounding box" check.
+
+  Seven independent rows, zero mismatches, before any of this was wired into the printer.
+- **New file**: `CUE4Parse/CUE4Parse/UE4/Assets/Exports/Material/EngineUniformBufferLayout.cs` -
+  `Dictionary<int, string?[]> ViewRows`/`PrimitiveRows`, row → 4 per-component names (`null` where
+  that byte range is real padding, not a named field).
+- **Wired into `PixelShaderDecompiler.cs`**: a `cbrow` node represents one *whole, unswizzled* row
+  (any `.x`/`.y`/`.z`/`.w` selection happens separately, at the reference site via `PrintArg`), so a
+  row where every component names the same field (any vector/matrix row) prints that name directly
+  (`View.SVPositionToTranslatedWorld`, `View.PreViewTranslation`, `Primitive.ObjectWorldPositionAndRadius`,
+  ...); a row packing several unrelated scalars can't collapse to one name without guessing which the
+  caller's swizzle will pick, so all four are shown instead (`View.Row137 /* x=DeltaTime,
+  y=MaterialTextureMipBias, ... */`) - the same rule `TryDescribeCollectionRow`'s scalar branch
+  already follows for Parameter Collection rows.
+- **Sets up, but does not by itself produce, the answer to the question that prompted this**: with
+  rows resolved, the shape `_23 = normalize(-_22)` (where `_22` is the reconstructed world position)
+  is recognizably **Camera Vector**, and `_24 = max(dot(_19, _23), 0)` (where `_19` is the
+  TBN-transformed, renormalized tangent-space normal) recognizably feeds a standard NdotV/Fresnel
+  term with **Pixel Normal WS** - but at this point that was still only a description *of* the
+  output, not literal text *in* it (the variables were still auto-numbered `_19`/`_22`/`_23`). The
+  user caught this directly ("i don't see Camera Vector in the file") - see the next section for the
+  actual fix.
+- Re-ran the full harness against both `F_MED_Body_Grave` and `M_FN_Character_MASTER` afterward: zero
+  exceptions, and the base material's output is unaffected apart from the new resolved names (no
+  `[instance: ...]` annotations appear there, as expected for a plain `UMaterial`).
+
+### Semantic idiom recognition - literal "CameraVector"/"PixelNormalWS"/"WorldPosition_CamRelative" names
+
+The row-name work above only resolves individual buffer *reads*; it doesn't recognize the
+multi-instruction *pattern* built on top of them. Implemented after the user pointed out the gap
+directly. Each recognized shape was confirmed against the engine's own compiled formula first, not
+pattern-matched speculatively:
+
+- **`Parameters.CameraVector`** (`Engine/Shaders/Private/MaterialTemplate.ush:2120`):
+  `Parameters.CameraVector = normalize(-Parameters.WorldPosition_CamRelative.xyz)` - the file's own
+  comment: "TranslatedWorldPosition is the world position translated to the camera position, which
+  is just -CameraVector".
+- **`Parameters.WorldPosition_CamRelative`** (`MaterialTemplate.ush:2101`): set directly from the
+  vertex shader's `TranslatedWorldPosition` interpolator - the value the SV_Position reconstruction
+  matrices (`SVPositionToTranslatedWorld`/`ScreenToWorld`/`ScreenToTranslatedWorld`/`ClipToTranslatedWorld`
+  - different pipeline paths pick different ones) perspective-divide their way back to in the pixel
+  shader.
+- **`PixelNormalWS`** (`HLSLMaterialTranslator.h PixelNormalWS()`): `return
+  AddInlinedCodeChunk(MCT_Float3, TEXT("Parameters.WorldNormal"))` - i.e. exactly the material's own
+  (unencoded) Normal output value, confirmed by UE's deferred GBuffer convention
+  (`Normal_output = WorldNormal*0.5+0.5`, observed consistently across every material decompiled this
+  session) - so the node feeding the "Normal" pin's `*0.5+0.5` encode *is* `Parameters.WorldNormal`.
+
+Implementation (`PixelShaderDecompiler.cs`):
+- `TryGetGBufferNormalEncodeInput` - matches the "Normal" pin's root against the `X*0.5+0.5` shape
+  (a `mad` node whose second and third args are both `imm` nodes ≈ 0.5); on match, `ctx.PixelNormalWsNode`
+  is seeded with `X` before the CSE/naming pass runs, so any later reference to that same node (by
+  reference identity, not by shape) gets the name `PixelNormalWS`.
+- `IsTranslatedWorldPositionDivide` - matches a `div` node dividing a node by its own `.w`
+  (a homogeneous-to-Euclidean divide), **and separately confirms** the numerator is built (through
+  any depth of `add`/`mul`) from at least one `cbrow` read that `EngineUniformBufferLayout` resolves
+  to one of the four position-reconstruction matrices above. The div-of-self shape alone is
+  deliberately not sufficient - it's the matrix-identity check that rules out mislabeling an unrelated
+  homogeneous divide.
+- `IsCameraVectorNode` - matches `rsqrt(dot3(N,N)) * -N` (by reference identity on `N`, not just
+  matching shape) where `N` independently passes `IsTranslatedWorldPositionDivide` - so a light
+  direction or any other `normalize(-X)` in the shader does *not* get relabeled, since `X` there was
+  never built from a position-reconstruction matrix row.
+- All three are added to `AssignNames`'s existing force-hoist set (previously only texture `sample`
+  nodes) and given their real name instead of `_N`, ahead of the generic texture-name/fallback checks.
+- **Verified against real output**: `M_FN_Character_MASTER` now reads
+  `var PixelNormalWS = (rsqrt(dot3(_18, _18)).www * _18); ... var WorldPosition_CamRelative = (_20 /
+  _20.www); var CameraVector = (rsqrt(dot3(-WorldPosition_CamRelative, -WorldPosition_CamRelative)).www
+  * -WorldPosition_CamRelative); var _21 = max(dot3(PixelNormalWS, CameraVector), 0); ... Normal =
+  (PixelNormalWS * Const(0.5, 0.5, 0.5, 0) + Const(0.5, 0.5, 0.5, 0));` - the last line is the strongest
+  possible confirmation, since `PixelNormalWS` there is literally its own detected GBuffer-encode
+  input. Checked the whole file afterward for any `rsqrt(dot3(-...` left un-renamed (would indicate a
+  missed case) - none found. Cross-checked against `arrows_animated` (a 2D UI material): its output
+  shows `WorldPosition_CamRelative` (it does reconstruct world position for an effect) but *no*
+  `CameraVector`/`PixelNormalWS` at all - correctly absent, since that material never actually
+  computes either, confirming the recognizers don't over-fire.
+
+### Tangent/Bitangent/VertexNormal - the TBN basis feeding PixelNormalWS
+
+Requested as a direct follow-up ("is there anything else we can clean up without guessing?"). `_15`/
+`_16`/`_17` in the earlier output (the raw `TEXCOORD10`/`TEXCOORD11` vertex interpolants and their
+cross-product combine) were still unlabeled. Before touching anything, confirmed which vertex factory
+actually compiled this shader rather than assuming: dumped `FMeshMaterialShaderMapLegacy.VertexFactoryTypeName`
+for every `TBasePassPS*` shader in `M_FN_Character_MASTER`'s shader map -
+**`TGPUSkinVertexFactorytrue`** (a skinned character material, not `LocalVertexFactory`/static mesh -
+worth checking, not assuming, since the two pack interpolants differently in principle).
+
+- **Confirmed against `GpuSkinVertexFactory.ush`'s `CalcTangentToWorld`**: `TangentToWorld0 =
+  TangentToWorld[0]` (Tangent) and `TangentToWorld2 = float4(TangentToWorld[2],
+  Input.TangentZ.w * Primitive.InvNonUniformScaleAndDeterminantSign.w)` (Normal, with the handedness
+  sign packed into `.w`).
+- **Confirmed against `MaterialTemplate.ush`'s `AssembleTangentToWorld`**: `TangentToWorld1 =
+  cross(TangentToWorld2.xyz, TangentToWorld0) * TangentToWorld2.w` (the reconstructed Bitangent), then
+  `half3x3(TangentToWorld0, TangentToWorld1, TangentToWorld2.xyz)` as the full TBN matrix - which
+  matches the decompiled math component-for-component: `_17 = cross(_15, _16) * _15.w` and
+  `_18 = TangentNormal.z*_15 + TangentNormal.x*_16 + TangentNormal.y*_17`.
+- **Deliberately not keyed off a fixed `TEXCOORD10`/`TEXCOORD11` register**: interpolator slot
+  assignment is compiler-packed per material (however many UV channels/other interpolants a specific
+  material also declares shifts which register everything after them lands on), unlike the
+  View/Primitive uniform buffers which are one fixed global struct - so hardcoding "TEXCOORD10 is
+  always Tangent" the way the row tables do for View/Primitive would be a real guess for a different
+  material. Instead, Tangent/Normal are identified by their *structural role* in the cross-product
+  reconstruction itself, which is identical regardless of which register they end up bound to.
+- **Raw DAG dumped first** (`PixelExpressionNode`/`PixelExpressionArg`'s actual `Op`/`Swizzle`/`Negate`
+  fields via a throwaway recursive printer in the test harness) rather than inferring the exact
+  swizzle/negate shape from the printed text, since printed text can hide which side of a subtraction
+  actually carries the `Negate` flag.
+- **`TryMatchCrossProduct`**: matches `mad(A.yzx, B.zxy, -mul(B.yzx, A.zxy))` - the only way to express
+  a *complete* 3-component cross product as one SIMD swizzle/mad/mul triple (not an arbitrary rotation
+  among several), so matching the literal `"yzx"`/`"zxy"` swizzle strings isn't narrower than the real
+  instruction shape.
+- **`TryMatchBitangent`**: confirms the outer `mul`'s second operand is the cross product's *own first
+  operand* (by reference identity) read again with a bare `.w`/`.www` swizzle - exactly
+  `TangentToWorld2.w`, ruling out a coincidentally cross-shaped node scaled by something unrelated.
+- **`ScanForTangentBasis`**: a one-time pre-pass (before the CSE/naming pass) walking every pin's DAG
+  for the first `TryMatchBitangent` match, seeding `PrintCtx.TangentNode`/`VertexNormalNode`/
+  `BitangentNode`; a material with no tangent-space normal map (no TBN reconstruction at all) leaves
+  all three null and nothing gets mislabeled.
+- **Naming collision avoided deliberately**: the reconstructed vertex normal is named `VertexNormal`,
+  not `Normal` - the bare identifier `Normal` is already the literal assignment target for the
+  material's `Normal` *output pin* (`Normal = (PixelNormalWS * 0.5 + 0.5);`), and `ctx.UsedNames` isn't
+  seeded with output-pin identifiers, so a hoisted variable literally named `Normal` would silently
+  collide with it.
+- **Verified against real output**: `M_FN_Character_MASTER` (and `F_MED_Body_Grave`, the instance) now
+  read `var VertexNormal = TEXCOORD11 (v1); var Tangent = TEXCOORD10 (v0); var Bitangent =
+  ((VertexNormal.yzx * Tangent.zxy + -(Tangent.yzx * VertexNormal.zxy)) * VertexNormal.www);` feeding
+  directly into the already-verified `PixelNormalWS`/`CameraVector` chain, with no regressions to
+  either. Re-checked `arrows_animated` (no tangent-space normal map): correctly zero
+  `Tangent`/`VertexNormal`/`Bitangent` output, confirming the recognizer doesn't over-fire there
+  either.
+
+### `lerp(a, b, t)` recognition for `mad(t, b-a, a)`-shaped math
+
+Requested directly: a lot of the output was long `(T * (-A + B) + A)`-shaped arithmetic that's just
+HLSL's `lerp` intrinsic in its compiled form. Unlike every other idiom in this file (`CameraVector`,
+`PixelNormalWS`, the View/Primitive row names, the TBN basis), **this one isn't tied to one specific
+engine source location** - `lerp(a,b,t) = a + t*(b-a)` is a generic mathematical identity, true
+regardless of whether the material graph used a dedicated `Lerp` node or hand-built the same blend
+from `Add`/`Subtract`/`Multiply`. That actually makes it lower-risk, not higher: rewriting
+`mad(t, b-a, a)` as `lerp(a, b, t)` never claims anything about which graph node produced it or what
+it semantically represents - it's provably the same expression, just shorter to read, the same class
+of transformation as a peephole optimizer would do, not an inference.
+
+- **`TryMatchLerp`** (`PixelShaderDecompiler.cs`, checked from the `mad` case in `PrintInstruction`
+  since HLSL's `lerp` always compiles to one `mad` instruction, never a dedicated opcode): requires
+  the `mad`'s third (additive) operand `A` to appear, completely unmodified (same node reference, same
+  swizzle, no extra negate/abs), negated inside the *other* operand's own `add(-A, B)` subtraction -
+  checked with either `mad` argument order, since multiplication is commutative and the compiler is
+  free to place `t` or the subtraction result first. Deliberately conservative: a subtraction result
+  that carries its own extra swizzle/negate/abs is left as fully expanded arithmetic rather than
+  guessed at, and `A` itself must be unnegated/non-absolute at the outer `mad` too - anything less
+  exact doesn't match, it just isn't simplified (never a wrong simplification).
+- **Verified against real output**: `M_FN_Character_MASTER`/`F_MED_Body_Grave` now read, e.g.,
+  `var _22 = lerp(Diffuse, (...skin-shaded computation...), HumanSkin);` (previously a much longer
+  `(HumanSkin * (-Diffuse + (...)) + Diffuse)` expression) - semantically sensible too, since blending
+  raw diffuse against a computed subsurface-scattering result by a `HumanSkin` factor is exactly the
+  kind of thing a "Human Skin" toggle/blend parameter would do. Several more instances matched
+  elsewhere in the same file. Re-ran the full harness afterward: zero exceptions; `arrows_animated`
+  (a material with no lerp-shaped math at all) correctly produced zero `lerp(...)` output, confirming
+  the recognizer doesn't over-fire.
+
 ## CUE4Parse fixes made this session
 
 The shared shader code library (`.ushaderbytecode`) — needed to actually fetch a shader's compiled
