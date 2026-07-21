@@ -132,6 +132,74 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     }
 
     Console.WriteLine();
+    Console.WriteLine("----- Material Parameter Collection diagnostics -----");
+    foreach (var resource in material.LoadedMaterialResources)
+    {
+        if (resource.LoadedShaderMapLegacy is not { } shaderMap) continue;
+        var expr = shaderMap.MaterialCompilationOutput.UniformExpressionSet;
+        Console.WriteLine($" Quality={shaderMap.ShaderMapId.QualityLevel}: ParameterCollections.Length={expr.ParameterCollections.Length}");
+        foreach (var guid in expr.ParameterCollections)
+            Console.WriteLine($"   collection GUID: {guid}");
+
+        var allShaders = shaderMap.Shaders
+            .Concat(shaderMap.MeshShaderMaps.SelectMany(m => m.Shaders))
+            .ToList();
+        var boundBufferNames = allShaders
+            .SelectMany(s => s.UniformBufferParameters.Select(p => p.Name))
+            .Distinct()
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        Console.WriteLine($"   distinct bound uniform buffer names across {allShaders.Count} shaders: {string.Join(", ", boundBufferNames)}");
+
+        foreach (var s in allShaders)
+        {
+            var collectionBuffers = s.UniformBufferParameters.Where(p => p.Name.StartsWith("MaterialCollection", StringComparison.Ordinal)).ToList();
+            if (collectionBuffers.Count > 0)
+                Console.WriteLine($"   shader '{s.TypeName}' binds: {string.Join(", ", collectionBuffers.Select(p => $"{p.Name}@baseIndex{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
+        }
+
+        var basePassShader = allShaders.FirstOrDefault(s => s.TypeName == "TBasePassPSFNoLightMapPolicy");
+        if (basePassShader != null)
+        {
+            Console.WriteLine($"   TBasePassPSFNoLightMapPolicy (Quality={shaderMap.ShaderMapId.QualityLevel}) MaterialUniformBuffer.BaseIndex={basePassShader.MaterialParameters?.MaterialUniformBuffer.BaseIndex} bound={basePassShader.MaterialParameters?.MaterialUniformBuffer.bIsBound}");
+            Console.WriteLine($"   all UniformBufferParameters: {string.Join(", ", basePassShader.UniformBufferParameters.Select(p => $"{(string.IsNullOrEmpty(p.Name) ? "(unnamed)" : p.Name)}@{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Material Parameter Collection resolution -----");
+    try
+    {
+        var collections = MaterialParameterCollectionResolver.FindReferencedCollections(material);
+        Console.WriteLine($"  Found {collections.Count} collection(s)");
+        foreach (var c in collections)
+        {
+            Console.WriteLine($"  Collection '{c.Name}' StateId={c.StateId} slotCount={c.Slots.Count}");
+            foreach (var (row, slot) in c.Slots.OrderBy(kv => kv.Key))
+            {
+                if (slot.VectorName != null) Console.WriteLine($"    row {row}: vector {slot.VectorName}");
+                else Console.WriteLine($"    row {row}: scalars [{string.Join(", ", slot.ScalarNames.Select((n, i) => $"{"xyzw"[i]}={n ?? "-"}"))}]");
+            }
+        }
+
+        foreach (var resource in material.LoadedMaterialResources)
+        {
+            if (resource.LoadedShaderMapLegacy is not { } sm) continue;
+            var pcs = sm.MaterialCompilationOutput.UniformExpressionSet.ParameterCollections;
+            Console.WriteLine($"  Quality={sm.ShaderMapId.QualityLevel}: shader map ParameterCollections=[{string.Join(", ", pcs.Select(g => g.ToString()))}]");
+            foreach (var g in pcs)
+            {
+                var resolved = MaterialParameterCollectionResolver.Resolve(material, g);
+                Console.WriteLine($"    {g} => {(resolved != null ? resolved.Name : "UNRESOLVED")}");
+            }
+        }
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine($"EXCEPTION: {e}");
+    }
+
+    Console.WriteLine();
     Console.WriteLine("----- Raw DXBC disassembly per pin -----");
     if (PixelShaderDecompiler.AnalyzeForDiagnostics(material) is { } diag2 && diag2.Wiring.Success)
     {
@@ -168,6 +236,43 @@ foreach (var needle in new[] { "linear_gradient", "Pattern-HeavyArrows" })
     var matches = provider.Files.Keys.Where(k => k.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToList();
     Console.WriteLine($"'{needle}': {matches.Count} match(es)");
     foreach (var m in matches) Console.WriteLine($"  {m}");
+}
+
+Console.WriteLine();
+Console.WriteLine("----- Material Parameter Collection asset dump -----");
+try
+{
+    var mpcPkg = provider.LoadPackage("FortniteGame/Content/Packages/Fortress_SharedMaterials/GlobalMaterialParameters/FortniteMaterialParameters");
+    for (var i = 0; i < mpcPkg.ExportMapLength; i++)
+    {
+        var p = new FPackageIndex(mpcPkg, i + 1).ResolvedObject;
+        if (p?.Object?.Value is not { } mpcObj) continue;
+        Console.WriteLine($"export[{i}] type={mpcObj.GetType().Name}");
+        Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(mpcObj, Newtonsoft.Json.Formatting.Indented));
+    }
+}
+catch (Exception e)
+{
+    Console.WriteLine($"EXCEPTION: {e}");
+}
+
+Console.WriteLine();
+Console.WriteLine("----- FN_Char_RimColor_v3 material function (cooked) raw dump -----");
+try
+{
+    var fnPkg = provider.LoadPackage("FortniteGame/Content/Packages/Fortress_SharedMaterials/Base_Material_Functions/FN_Char_RimColor_v3");
+    for (var i = 0; i < fnPkg.ExportMapLength; i++)
+    {
+        var p = new FPackageIndex(fnPkg, i + 1).ResolvedObject;
+        if (p?.Object?.Value is not { } obj) continue;
+        if (!obj.ExportType.Contains("CollectionParameter", StringComparison.OrdinalIgnoreCase)) continue;
+        Console.WriteLine($"export[{i}] type={obj.ExportType} name={obj.Name}");
+        Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(obj, Newtonsoft.Json.Formatting.Indented));
+    }
+}
+catch (Exception e)
+{
+    Console.WriteLine($"EXCEPTION: {e}");
 }
 
 Console.WriteLine();

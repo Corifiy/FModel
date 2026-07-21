@@ -234,6 +234,128 @@ every step verified against real data rather than guessed:
    function-nested textures fall back honestly as described in point 5, consistently hoisted like
    every other sample now.
 
+### Material Parameter Collection (MPC) identification
+
+Requested after the user pointed out `M_FN_Character_MASTER` calls a material function
+(`FN_Char_RimColor_v3`) that references the `FortniteMaterialParameters` MPC via three
+`MaterialExpressionCollectionParameter` nodes, with the raw with-editor JSON for those nodes as
+evidence.
+
+**Correction (this session, after the user firmly disputed an earlier wrong conclusion here):**
+an initial diagnostic pass reported `ParameterCollections.Length == 0` for this material's compiled
+shader map and concluded the compiled shader never references the MPC despite the source-level
+node existing. The user rejected that outright ("It is used buddy... it is factual"). Re-investigating
+instead of standing by the prior finding turned up a real parsing bug in CUE4Parse, not a dead
+code path in the material:
+
+- `FUniformExpressionSet::Serialize` (engine source, `MaterialUniformExpressions.cpp:102-116`)
+  serializes, in order: the five expression arrays, then a **reserved/always-empty-at-this-engine-
+  version `Uniform2DTextureArrayExpressions` array** (the comment there literally says "Adding 2D
+  texture array now to prevent bumping version when the feature gets added" — i.e. serialized
+  even though nothing populates it yet), and only *after that* `ParameterCollections`.
+- CUE4Parse's `FUniformExpressionSetLegacy` constructor (`LegacyShaderMap.cs`) had a `PreVirtualTexture`
+  branch that read `UniformExternalTextureExpressions` and then jumped straight to
+  `ParameterCollections = Ar.ReadArray<FGuid>()`, skipping the reserved array's read entirely. Since
+  that reserved array's serialized count is always `0`, the code was reading *that* `0` as if it
+  were `ParameterCollections`'s own count, then returning immediately — leaving the real
+  `ParameterCollections` array (count + GUIDs, whenever non-empty) unconsumed in the stream, where it
+  silently fell into the `SkipToDebugDescription` anchor-skip a few fields later. This is exactly what
+  an old comment in that same file had already half-noticed ("M_FN_Character_MASTER measures 78 [bytes],
+  ... consistent with its material parameter collection reference") without tracing it to root cause.
+- **Fix**: added the missing `ReadExpressionArray(Ar)` call for the reserved array before reading
+  `ParameterCollections`, matching the engine order exactly.
+- **Verified against real data after the fix**: `M_FN_Character_MASTER`'s shader map now reports
+  `ParameterCollections.Length=1` (both quality levels), GUID `BEC8A175-4188E7B2-...`, which
+  `MaterialParameterCollectionResolver` correctly resolves to `FortniteMaterialParameters` — matching
+  the user's evidence exactly. Re-ran the full harness afterward: zero exceptions, no change to any
+  other material's decompiled output (the bug only affected the `ParameterCollections` tail, not the
+  expression arrays themselves).
+
+1. **Confirmed via engine source that MPC values structurally never appear in an
+   `FMaterialUniformExpression` tree at all**: `AccessCollectionParameter`
+   (`HLSLMaterialTranslator.h:2327`) emits a direct HLSL constant-buffer read,
+   `MaterialCollection{N}.Vectors[ParameterIndex]`, completely bypassing the uniform-expression
+   system. So Layer 1 can never show these by design, not by omission.
+2. **`FUniformExpressionSet(Legacy).ParameterCollections[N]` stores exactly the referenced
+   collection's own `StateId`** — confirmed directly in `FUniformExpressionSet::SetParameterCollections`
+   (`MaterialUniformExpressions.cpp:220`: `ParameterCollections.Add(InCollections[CollectionIndex]->StateId)`).
+   A bare GUID, with no path back to which package it belongs to.
+3. **`M_FN_Character_MASTER`'s compiled shader map does reference the MPC** (see the correction
+   above for the parsing bug that originally hid this): `ParameterCollections.Length == 1` for both
+   quality levels, resolving to `FortniteMaterialParameters`. Separately, though: a scan of every
+   distinct uniform buffer name bound across all 233 compiled shader variants (every stage, every
+   permutation) in this specific cooked resource still turns up zero shaders that actually bind a
+   `MaterialCollection0/1` buffer at the bytecode level. That's not a contradiction —
+   `ParameterCollections` is populated once per material during translation (whenever
+   `AccessCollectionParameter` is called for *any* output property during HLSL generation,
+   `FMaterial::CompileProperty`/`GetReferencedParameterCollections`), while the specific, already-
+   optimized DXBC bytecode for a given compiled permutation can still end up not reading it if that
+   branch got compiled away for that permutation/quality — e.g. the same Static Switch pattern
+   already confirmed for `EQ_MaxIntensityTreble`/`Rim_Light_Overall_Boost` earlier in this material.
+   The pixel-shader reconstruction path also deliberately picks the "cleanest" permutation
+   (`FNoLightMapPolicy`, non-Skylight) for readability, which may not be the specific permutation
+   where a given conditional branch is live — this remains unverified per-permutation (see point 8).
+4. **The same "properties survive cooking, wiring doesn't" pattern already relied on for textures
+   holds here too** — verified by loading `FN_Char_RimColor_v3` directly and dumping its cooked,
+   non-editor `MaterialExpressionCollectionParameter` exports: `Collection` (a fully resolvable
+   reference to the `FortniteMaterialParameters` package), `ParameterName`, and `ParameterId` are
+   all intact, exactly matching the with-editor JSON the user provided, byte-for-byte on the three
+   GUIDs given (`SunAndMoonModelDirectionalVector`/`SunLightColor`/`FogDirectionalInscatteringColor`).
+5. **The scalar/vector packing layout is read straight from the engine source, not inferred**:
+   `UMaterialParameterCollection::GetParameterIndex` (`ParameterCollection.cpp:303`) - scalar
+   parameters pack 4-to-a-row in declaration order (`row = i/4, component = i%4`), vector
+   parameters occupy one full row each, starting immediately after the last (possibly partial)
+   scalar row.
+6. **New file**: `CUE4Parse/CUE4Parse/UE4/Assets/Exports/Material/MaterialParameterCollectionResolver.cs`.
+   `FindReferencedCollections(UMaterialInterface)` walks the base material's own package plus every
+   `MaterialExpressionMaterialFunctionCall` target it can reach (bounded depth, cycle-safe via a
+   visited-package set), collecting every `MaterialExpressionCollectionParameter.Collection`
+   found and building one `ResolvedCollection` per unique asset (deduped by `StateId`) with a
+   complete row map built from the collection's *entire* `ScalarParameters`/`VectorParameters`
+   lists - not just the specific parameters the material happens to reference by name. None of the
+   involved classes (`MaterialExpressionCollectionParameter`, `MaterialExpressionMaterialFunctionCall`,
+   `UMaterialParameterCollection`) have dedicated CUE4Parse C# types, so every read goes through the
+   generic `GetOrDefault<T>` property-holder API rather than typed members.
+   **Verified against real data**: run against `M_FN_Character_MASTER`, correctly found the one
+   collection, computed all 71 rows, and placed all three named parameters as full-row vectors at
+   the exact row indices matching the real asset dump (`SunLightColor` row 22,
+   `FogDirectionalInscatteringColor` row 27, `SunAndMoonModelDirectionalVector` row 29) - the row
+   contents for the scalar-packed rows (0-3) also matched the collection's raw JSON dump exactly,
+   in declaration order.
+7. **Wired into `PixelShaderDecompiler.cs`**: a foreign `cbrow`'s `Detail` string is built by the
+   analyzer as the exact literal `"{bufferName} cb{Index0}[{Index1}]"` whenever the bound buffer's
+   name is known (already relied on for the `FViewUniformShaderParameters`-style labels). A regex
+   matching that exact format specifically for a `MaterialCollectionN` buffer name resolves `N` to
+   `expressionSet.ParameterCollections[N]`, calls the resolver, and prints either the vector
+   parameter's name directly (`SunLightColor /* FortniteMaterialParameters[22] */`) or, for a
+   scalar-packed row, all 4 possible names at that row as a comment (since which *specific*
+   component a given read means is decided by the swizzle the caller already prints alongside this
+   value, not by anything visible at this leaf) - never guesses which one.
+8. **Fully verified end-to-end, including the `cbrow` textual output.** The Quality=High resource's
+   `TBasePassPSFNoLightMapPolicy` bytecode does read the collection - at constant-buffer register cb2,
+   rows 22/27/29 - it just isn't labeled by name there, because **MaterialCollectionN buffers are
+   never named in a shader's own reflected `UniformBufferParameters` list, for any shader**: confirmed
+   against engine source, `FShaderUniformBufferParameter::ModifyCompilationEnvironment`
+   (`HLSLMaterialTranslator.h:1082-1090`) only declares the raw HLSL cbuffer/resource-table entry for
+   it; the buffer is bound at draw time through a separate runtime path, never through a serialized
+   `FShaderUniformBufferParameter` the way View/Primitive/Material are. That's also why the "233
+   shaders" buffer-name scan in point 3 never finds one, for any material, by design - not a bug.
+   So the `cbrow` printer was extended with a second resolution path, purely by elimination: any
+   foreign cbrow that reaches the plain `cb{N}[{row}]` fallback (no name resolved, and N isn't the
+   Material buffer's own register - confirmed distinct: Quality=Low's `MaterialUniformBuffer.BaseIndex`
+   is 2 with no other register in play at all, matching that quality level's whole rim-light/MPC branch
+   being stripped; Quality=High's is 3, with cb2 as the one leftover register) is, by elimination, one
+   of the shader map's own `ParameterCollections` entries - matched to `ParameterCollections` in order
+   of first appearance while printing (exact for the single-collection case verified here; a
+   hypothetical multi-collection material would need the ordering assumption revisited).
+   **Result, verified against the real compiled output**: `M_FN_Character_MASTER`'s Quality=High
+   pseudocode now reads `SunLightColor /* FortniteMaterialParameters[22] */`,
+   `FogDirectionalInscatteringColor /* FortniteMaterialParameters[27] */`, and
+   `SunAndMoonModelDirectionalVector /* FortniteMaterialParameters[29] */` at exactly the DXBC
+   instructions that dataflow into `Emissive Color` - matching the user's original with-editor JSON
+   evidence by name, not just by mechanism. Re-ran the full harness afterward: zero exceptions, no
+   regressions elsewhere.
+
 ## CUE4Parse fixes made this session
 
 The shared shader code library (`.ushaderbytecode`) — needed to actually fetch a shader's compiled
@@ -251,6 +373,13 @@ Fixed by porting (from the sibling project) and verifying compilation against ou
   consistency syncs from the sibling project (version-gated hash lengths for GAME_UE5_8+,
   correctly-typed bitfield accessors). Not required for the UE4.23 target but harmless and keeps
   the fork in sync.
+
+`FUniformExpressionSetLegacy`'s `PreVirtualTexture` branch (`LegacyShaderMap.cs`) was silently
+misreading `ParameterCollections` as always-empty for every pre-4.25 material, regardless of whether
+it actually referenced an MPC — see the "Material Parameter Collection identification" section above
+for the full root-cause trace (a missing reserved-array read that the real engine always serializes
+just before `ParameterCollections`, per `FUniformExpressionSet::Serialize`). Fixed by reading and
+discarding that reserved array before `ParameterCollections`, matching engine order exactly.
 
 Verified end-to-end by the user opening/exporting the shared shader library as JSON in the running
 app — confirmed working (real hash → offset/size/frequency entries, matching
@@ -399,8 +528,9 @@ app is currently running and needs to be closed first.
 
 New:
 - `CUE4Parse/CUE4Parse/UE4/Assets/Exports/Material/MaterialShaderDecompiler.cs` (342 lines)
+- `CUE4Parse/CUE4Parse/UE4/Assets/Exports/Material/MaterialParameterCollectionResolver.cs`
 - `CUE4Parse/CUE4Parse/UE4/Shaders/FLegacyShaderCodeArchive.cs` (57 lines)
-- `FModel/ViewModels/PixelShaderDecompiler.cs` (536 lines)
+- `FModel/ViewModels/PixelShaderDecompiler.cs` (536 lines, since grown further for MPC support)
 - `FModel/ViewModels/MaterialPixelShaderAnalyzer.cs` (3189 lines, ported verbatim)
 - `FModel/ViewModels/MaterialDxil.cs` (1056 lines, ported verbatim)
 - `ShaderDecompileTest/` (whole project — `ShaderDecompileTest.csproj`, `Program.cs`)

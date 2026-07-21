@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.Texture;
@@ -115,7 +116,7 @@ public static class PixelShaderDecompiler
         // every node reached more than once across the whole shader is hoisted into a named
         // declaration up front, in dependency order, and every other reference to it becomes just
         // that name - this is a straightforward CSE pass over the DAG, not a rewrite of it.
-        var ctx = new PrintCtx(expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material));
+        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material));
         var recursed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
@@ -233,10 +234,13 @@ public static class PixelShaderDecompiler
     /// shared) expression DAG so a subtree reached from many places is declared once and referenced
     /// by name everywhere else, instead of being fully re-expanded at every occurrence.
     /// </summary>
-    private sealed class PrintCtx(FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures)
+    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures)
     {
+        public readonly UMaterialInterface Material = material;
         public readonly FUniformExpressionSetLegacy ExpressionSet = expressionSet;
         public readonly IReadOnlyList<UTexture?>? ReferencedTextures = referencedTextures;
+        public readonly Dictionary<int, MaterialParameterCollectionResolver.ResolvedCollection?> CollectionCache = new();
+        public readonly Dictionary<int, int> LeftoverCbRegisterToCollectionIndex = new();
         public readonly Dictionary<PixelExpressionNode, int> RefCounts = new(ReferenceEqualityComparer.Instance);
         public readonly Dictionary<PixelExpressionNode, string> Names = new(ReferenceEqualityComparer.Instance);
         public readonly HashSet<string> UsedNames = new(StringComparer.Ordinal);
@@ -359,6 +363,89 @@ public static class PixelShaderDecompiler
         return source.Channel >= 0 ? $"{name}.{"rgba"[source.Channel]}" : name;
     }
 
+    /// <summary>
+    /// A foreign cbrow's Detail is built by MaterialPixelShaderAnalyzer.cs (~line 2286) as the exact
+    /// literal "{bufferName} cb{Index0}[{Index1}]" whenever the bound buffer's own name is known -
+    /// this matches that format specifically for the "MaterialCollectionN" buffer name the engine
+    /// binds a referenced Parameter Collection under (HLSLMaterialTranslator.h AccessCollectionParameter),
+    /// to resolve N -> the shader map's own ParameterCollections[N] GUID -> the actual collection
+    /// asset (MaterialParameterCollectionResolver, verified against real data) -> the row's
+    /// parameter name(s). Falls through untouched for every other buffer name.
+    /// </summary>
+    private static readonly Regex MaterialCollectionCbPattern = new(@"^MaterialCollection(?<n>\d+) cb\d+\[(?<row>\d+)\]$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// MaterialCollectionN buffers are NEVER named in a shader's own reflected UniformBufferParameters
+    /// list, for any shader - confirmed against engine source: ModifyCompilationEnvironment
+    /// (HLSLMaterialTranslator.h:1082-1090) only declares the raw HLSL cbuffer/resource-table entry;
+    /// the buffer is bound at draw time through a separate runtime path, never through a serialized
+    /// FShaderUniformBufferParameter the way View/Primitive/Material are (verified: M_FN_Character_MASTER's
+    /// Quality=High TBasePassPSFNoLightMapPolicy reads register cb2 at rows 22/27/29 - exactly the rows
+    /// MaterialParameterCollectionResolver computed for SunLightColor/FogDirectionalInscatteringColor/
+    /// SunAndMoonModelDirectionalVector - while its own MaterialUniformBuffer.BaseIndex is 3, and
+    /// UniformBufferParameters lists only View@0/Primitive@1; Quality=Low, whose compiled bytecode never
+    /// takes that branch, has no such register and Material sits at cb2 instead). So any foreign cbrow
+    /// that reaches the plain "cb{N}[{row}]" fallback (no name resolved, N isn't the Material buffer's
+    /// own register) is, by elimination, one of the shader map's own ParameterCollections entries.
+    /// Registers are matched to ParameterCollections in order of first appearance while printing, which
+    /// is exact for the single-collection case (the only one verified against real data); for a
+    /// hypothetical material referencing more than one collection this ordering is a best-effort
+    /// heuristic, not a proven mapping.
+    /// </summary>
+    private static readonly Regex ForeignCbPattern = new(@"^cb(?<n>\d+)\[(?<row>\d+)\]$", RegexOptions.Compiled);
+
+    private static bool TryDescribeParameterCollectionRead(string? detail, PrintCtx ctx, out string result)
+    {
+        result = "";
+        if (string.IsNullOrEmpty(detail)) return false;
+
+        var namedMatch = MaterialCollectionCbPattern.Match(detail);
+        if (namedMatch.Success)
+        {
+            var n = int.Parse(namedMatch.Groups["n"].Value);
+            var row = int.Parse(namedMatch.Groups["row"].Value);
+            return TryDescribeCollectionRow(n, row, ctx, out result);
+        }
+
+        var foreignMatch = ForeignCbPattern.Match(detail);
+        if (foreignMatch.Success && ctx.ExpressionSet.ParameterCollections.Length > 0)
+        {
+            var register = int.Parse(foreignMatch.Groups["n"].Value);
+            var row = int.Parse(foreignMatch.Groups["row"].Value);
+            if (!ctx.LeftoverCbRegisterToCollectionIndex.TryGetValue(register, out var n))
+            {
+                if (ctx.LeftoverCbRegisterToCollectionIndex.Count >= ctx.ExpressionSet.ParameterCollections.Length) return false;
+                n = ctx.LeftoverCbRegisterToCollectionIndex.Count;
+                ctx.LeftoverCbRegisterToCollectionIndex[register] = n;
+            }
+            return TryDescribeCollectionRow(n, row, ctx, out result);
+        }
+
+        return false;
+    }
+
+    private static bool TryDescribeCollectionRow(int n, int row, PrintCtx ctx, out string result)
+    {
+        result = "";
+        if (n < 0 || n >= ctx.ExpressionSet.ParameterCollections.Length) return false;
+
+        if (!ctx.CollectionCache.TryGetValue(n, out var collection))
+            ctx.CollectionCache[n] = collection = MaterialParameterCollectionResolver.Resolve(ctx.Material, ctx.ExpressionSet.ParameterCollections[n]);
+        if (collection == null || !collection.Slots.TryGetValue(row, out var slot)) return false;
+
+        if (slot.VectorName != null)
+        {
+            result = $"{SanitizeIdentifier(slot.VectorName)} /* {collection.Name}[{row}] */";
+            return true;
+        }
+        // A scalar-packed row holds up to 4 unrelated parameters, one per component - which
+        // specific one this particular read means is decided by the swizzle PrintArg appends
+        // around this value, not by anything visible here, so all 4 are shown rather than guessing.
+        var names = string.Join(", ", "xyzw".Select((c, i) => $"{c}={slot.ScalarNames[i] ?? "?"}"));
+        result = $"{collection.Name}[{row}] /* {names} */";
+        return true;
+    }
+
     private static string PrintNodeBody(PixelExpressionNode node, PrintCtx ctx)
     {
         var expr = PrintNodeInner(node, ctx);
@@ -375,9 +462,11 @@ public static class PixelShaderDecompiler
                 return string.IsNullOrEmpty(node.Detail) ? "Input" : node.Detail;
             case "cbrow":
                 // Source is only set for reads from the Material constant buffer; reads from any
-                // other bound buffer (View, Primitive, ...) are non-material engine state and carry
-                // a plain label in Detail instead (see MaterialPixelShaderAnalyzer.cs ~line 2286).
+                // other bound buffer (View, Primitive, MaterialCollectionN, ...) are non-material
+                // engine state and carry a plain label in Detail instead (see
+                // MaterialPixelShaderAnalyzer.cs ~line 2286).
                 if (node.Source is { } cbSource) return DescribeSource(cbSource, ctx);
+                if (TryDescribeParameterCollectionRead(node.Detail, ctx, out var mpcRead)) return mpcRead;
                 return string.IsNullOrEmpty(node.Detail) ? "/* unresolved constant buffer read */ 0" : $"/* {node.Detail} */ 0";
             case "sample":
                 return $"{node.Detail}({string.Join(", ", node.Args.Select(a => PrintArg(a, ctx)))})" +
