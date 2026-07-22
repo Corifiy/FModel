@@ -9,7 +9,7 @@ using FModel.ViewModels;
 
 const string paksPath = @"V:\.builds\10.40\FortniteGame\Content\Paks";
 const string aesKey = "0x3FF229552FE0F0DC46A495F9E94766EB6B5106A136597C60E7132F413B7C016E";
-const string assetPath = "FortniteGame/Content/Characters/Player/Female/Medium/Bodies/F_Med_Soldier_01/Skins/BR_Grave/Materials/F_MED_Body_Grave";
+const string assetPath = "FortniteGame/Content/Characters/Player/Male/Medium/Bodies/M_MED_Banner/Materials/MI_MED_Banner_body";
 
 Console.WriteLine($"Mounting {paksPath} ...");
 var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_23), StringComparer.OrdinalIgnoreCase)
@@ -20,6 +20,16 @@ provider.Initialize();
 provider.SubmitKeys(new Dictionary<FGuid, FAesKey> { [new FGuid()] = new FAesKey(aesKey) });
 provider.PostMount();
 Console.WriteLine($"Mounted: {provider.MountedVfs.Count} archives, {provider.Files.Count} files.");
+
+var bannerCandidates = provider.Files.Keys
+    .Where(k => k.Contains("Banner", StringComparison.OrdinalIgnoreCase)
+             && k.Contains("Material", StringComparison.OrdinalIgnoreCase)
+             && k.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
+    .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+    .ToList();
+Console.WriteLine();
+Console.WriteLine($"----- Banner-related material assets found ({bannerCandidates.Count}) -----");
+foreach (var c in bannerCandidates) Console.WriteLine($"  {c}");
 
 Console.WriteLine($"Loading {assetPath} ...");
 var pkg = provider.LoadPackage(assetPath);
@@ -96,6 +106,143 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     else
     {
         Console.WriteLine("  (no wiring)");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- M-channel provenance for Emissive Color, per quality level -----");
+    foreach (var resource in material.LoadedMaterialResources)
+    {
+        if (resource.LoadedShaderMapLegacy is not { } shaderMapForM) continue;
+        var qualityLabel = $"Quality={shaderMapForM.ShaderMapId.QualityLevel} FeatureLevel={shaderMapForM.ShaderMapId.FeatureLevel}";
+        if (PixelShaderDecompiler.AnalyzeForDiagnostics(material, shaderMapForM) is not { } mDiag || !mDiag.Wiring.Success)
+        {
+            Console.WriteLine($"  {qualityLabel}: analysis failed");
+            continue;
+        }
+
+        var referencedTextures = MaterialShaderDecompiler.GetReferencedTextures(material);
+        string? ResolveSampleName(PixelExpressionNode n)
+        {
+            if (n.Source is not { Kind: PixelValueKind.Texture } src) return null;
+            var array = src.TextureSlot switch
+            {
+                0 => mDiag.ExpressionSet.Uniform2DTextureExpressions,
+                1 => mDiag.ExpressionSet.UniformCubeTextureExpressions,
+                3 => mDiag.ExpressionSet.UniformVolumeTextureExpressions,
+                4 => mDiag.ExpressionSet.UniformVirtualTextureExpressions,
+                _ => null,
+            };
+            if (array == null || src.Index < 0 || src.Index >= array.Length) return null;
+            return MaterialShaderDecompiler.TryResolveTextureIdentifier(array[src.Index], referencedTextures);
+        }
+
+        PixelExpressionNode? mNode = null;
+        var seen1 = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        void FindM(PixelExpressionNode node)
+        {
+            if (!seen1.Add(node)) return;
+            if (node.Op == "sample" && ResolveSampleName(node) == "M") mNode = node;
+            foreach (var arg in node.Args) FindM(arg.Node);
+        }
+        foreach (var root in mDiag.Wiring.PinExpressions.Values) FindM(root);
+
+        if (mNode == null)
+        {
+            Console.WriteLine($"  {qualityLabel}: 'M' not sampled in this resource's compiled shader.");
+            continue;
+        }
+
+        // Provenance resolver: for a given node + a specific single output component (0=x..3=w),
+        // determines which M-texture channel(s) actually determine that component's value, by
+        // propagating through component-wise ops (mul/add/mad/min/max/...) where output.i is a pure
+        // function of each arg's OWN component i (translated through that arg's swizzle) - never
+        // guessed, only followed through ops that are provably component-wise (dot/cross products,
+        // which MIX components together, are deliberately NOT descended into - provenance through
+        // those would require actual numeric weighting, not a clean channel identity).
+        HashSet<char> ResolveMSources(PixelExpressionNode node, int component, HashSet<PixelExpressionNode> guard)
+        {
+            if (ReferenceEquals(node, mNode)) return ["xyzw"[component]];
+            if (!guard.Add(node)) return [];
+            var result = new HashSet<char>();
+            IEnumerable<PixelExpressionArg> argsToFollow = node.Op switch
+            {
+                "mul" or "add" or "sub" or "mad" or "min" or "max" or "div" => node.Args,
+                // phi = [Condition, Then, Else] (MergeBranches always emits exactly this order);
+                // movc = the raw SM5 conditional-move instruction, same [Condition, Then, Else] arg
+                // shape (PrintInstruction's own "movc" case prints it identically to phi: "cond ? A
+                // : B"). Neither's Condition is a data source, but either Then/Else could be live at
+                // runtime, so both are valid provenance sources to report.
+                "phi" or "movc" when node.Args.Count == 3 => [node.Args[1], node.Args[2]],
+                _ => [],
+            };
+            foreach (var arg in argsToFollow)
+            {
+                var argComponent = arg.Swizzle.Length switch
+                {
+                    0 => component,
+                    1 => "xyzw".IndexOf(arg.Swizzle[0]),
+                    _ => component < arg.Swizzle.Length ? "xyzw".IndexOf(arg.Swizzle[component]) : -1,
+                };
+                if (argComponent < 0) continue;
+                foreach (var c in ResolveMSources(arg.Node, argComponent, guard)) result.Add(c);
+            }
+            guard.Remove(node);
+            return result;
+        }
+
+        Console.WriteLine($"  {qualityLabel}: available pin keys = [{string.Join(", ", mDiag.Wiring.PinExpressions.Keys)}]");
+        if (!mDiag.Wiring.PinExpressions.TryGetValue("Emissive Color", out var emissiveRoot))
+        {
+            Console.WriteLine($"  {qualityLabel}: no Emissive Color pin");
+            continue;
+        }
+        Console.WriteLine($"  {qualityLabel}: Emissive Color root op={emissiveRoot.Op} argCount={emissiveRoot.Args.Count} argOps=[{string.Join(", ", emissiveRoot.Args.Select(a => $"{a.Node.Op}(swz={a.Swizzle})"))}]");
+        var r = ResolveMSources(emissiveRoot, 0, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+        var g = ResolveMSources(emissiveRoot, 1, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+        var b = ResolveMSources(emissiveRoot, 2, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+        Console.WriteLine($"  {qualityLabel}: Emissive.r <- M[{string.Join(",", r.OrderBy(c => c))}]  Emissive.g <- M[{string.Join(",", g.OrderBy(c => c))}]  Emissive.b <- M[{string.Join(",", b.OrderBy(c => c))}]");
+
+        // Isolate specifically what's multiplied by Rim_Intensity, rather than the whole Emissive
+        // Color pin (which also mixes in Skin/SSS, DeRez, and OutOfBoundsMask branches that touch M
+        // for entirely unrelated reasons).
+        var rimIntensityIdx = Array.FindIndex(mDiag.ExpressionSet.UniformScalarExpressions, e => e.ParameterName == "Rim Intensity");
+        Console.WriteLine($"  {qualityLabel}: Rim_Intensity scalar index = {rimIntensityIdx}");
+        if (rimIntensityIdx >= 0)
+        {
+            // Find EVERY node anywhere that directly consumes the Rim_Intensity cbrow as an arg -
+            // regardless of parent op shape (mul, mad-as-multiplier, mad-as-addend, anything) - so a
+            // fused mad instruction isn't silently missed the way a mul-only search would miss it.
+            var consumers = new List<(PixelExpressionNode Parent, int ArgIndex)>();
+            var seen3 = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+            void FindConsumers(PixelExpressionNode node)
+            {
+                if (!seen3.Add(node)) return;
+                for (var i = 0; i < node.Args.Count; i++)
+                {
+                    var a = node.Args[i];
+                    if (a.Node.Op == "cbrow" && a.Node.Source is { Kind: PixelValueKind.ScalarExpression, Index: var idx } && idx == rimIntensityIdx)
+                        consumers.Add((node, i));
+                }
+                foreach (var arg in node.Args) FindConsumers(arg.Node);
+            }
+            foreach (var root in mDiag.Wiring.PinExpressions.Values) FindConsumers(root);
+
+            Console.WriteLine($"  {qualityLabel}: found {consumers.Count} direct consumer(s) of the Rim_Intensity cbrow");
+            foreach (var (parent, argIndex) in consumers)
+            {
+                Console.WriteLine($"    parent op={parent.Op} argCount={parent.Args.Count} rimIntensityIsArg#{argIndex} otherArgs=[{string.Join(", ", parent.Args.Select((a, argI) => argI == argIndex ? "<RimIntensity>" : $"#{argI}:{a.Node.Op}(swz={a.Swizzle})"))}]");
+                for (var otherIdx = 0; otherIdx < parent.Args.Count; otherIdx++)
+                {
+                    if (otherIdx == argIndex) continue;
+                    var operand = parent.Args[otherIdx].Node;
+                    var rr = ResolveMSources(operand, 0, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+                    var rg = ResolveMSources(operand, 1, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+                    var rb = ResolveMSources(operand, 2, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+                    var rw = ResolveMSources(operand, 3, new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance));
+                    Console.WriteLine($"      arg#{otherIdx} op={operand.Op}: .x<-M[{string.Join(",", rr.OrderBy(c => c))}] .y<-M[{string.Join(",", rg.OrderBy(c => c))}] .z<-M[{string.Join(",", rb.OrderBy(c => c))}] .w<-M[{string.Join(",", rw.OrderBy(c => c))}]");
+                }
+            }
+        }
     }
 
     Console.WriteLine();
@@ -209,6 +356,44 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
         {
             Console.WriteLine($"   TBasePassPSFNoLightMapPolicy (Quality={shaderMap.ShaderMapId.QualityLevel}) MaterialUniformBuffer.BaseIndex={basePassShader.MaterialParameters?.MaterialUniformBuffer.BaseIndex} bound={basePassShader.MaterialParameters?.MaterialUniformBuffer.bIsBound}");
             Console.WriteLine($"   all UniformBufferParameters: {string.Join(", ", basePassShader.UniformBufferParameters.Select(p => $"{(string.IsNullOrEmpty(p.Name) ? "(unnamed)" : p.Name)}@{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Static switch parameters (whole instance chain) -----");
+    {
+        UMaterialInterface? current = material;
+        var guard = 0;
+        while (current is UMaterialInstance instance && ++guard < 16)
+        {
+            var sp = instance.StaticParameters;
+            if (sp?.StaticSwitchParameters is { Length: > 0 } switches)
+            {
+                Console.WriteLine($"  {instance.Name}:");
+                foreach (var sw in switches)
+                    Console.WriteLine($"    {sw.Name} = {sw.Value}");
+            }
+            current = instance.Parent as UMaterialInterface;
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Base material's own declared StaticSwitchParameter nodes (defaults) -----");
+    {
+        UMaterialInterface? current = material;
+        var guard = 0;
+        while (current is UMaterialInstance instance && ++guard < 16)
+            current = instance.Parent as UMaterialInterface;
+        if (current is UMaterial baseMaterial)
+        {
+            foreach (var index in baseMaterial.Expressions)
+            {
+                if (index?.ResolvedObject?.Object?.Value is not { } export) continue;
+                if (!export.ExportType.Contains("StaticSwitchParameter", StringComparison.Ordinal)) continue;
+                var name = export.GetOrDefault<FName>("ParameterName").Text;
+                var def = export.GetOrDefault<bool>("DefaultValue");
+                Console.WriteLine($"  {name} default={def}");
+            }
         }
     }
 
