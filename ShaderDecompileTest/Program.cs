@@ -1,3 +1,4 @@
+using System.Linq;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.Texture;
@@ -6,13 +7,16 @@ using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Versions;
 using CUE4Parse.Encryption.Aes;
 using FModel.ViewModels;
+using Serilog;
 
-const string paksPath = @"V:\.builds\10.40\FortniteGame\Content\Paks";
-const string aesKey = "0x3FF229552FE0F0DC46A495F9E94766EB6B5106A136597C60E7132F413B7C016E";
-const string assetPath = "FortniteGame/Content/Characters/Player/Male/Medium/Bodies/M_MED_Banner/Materials/MI_MED_Banner_body";
+Log.Logger = new LoggerConfiguration().MinimumLevel.Warning().WriteTo.Console().CreateLogger();
+
+const string paksPath = @"V:\.builds\1.10\FortniteGame\Content\Paks";
+const string aesKey = "0x79323938716A53623131354E71513341676164333044576E3251597254493843";
+const string assetPath = "FortniteGame/Content/Athena/Prototype/Terrain/M_Athena_Fortress_Skybox_LF_Spinning_2";
 
 Console.WriteLine($"Mounting {paksPath} ...");
-var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_23), StringComparer.OrdinalIgnoreCase)
+var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_19), StringComparer.OrdinalIgnoreCase)
 {
     ReadShaderMaps = true
 };
@@ -20,16 +24,6 @@ provider.Initialize();
 provider.SubmitKeys(new Dictionary<FGuid, FAesKey> { [new FGuid()] = new FAesKey(aesKey) });
 provider.PostMount();
 Console.WriteLine($"Mounted: {provider.MountedVfs.Count} archives, {provider.Files.Count} files.");
-
-var bannerCandidates = provider.Files.Keys
-    .Where(k => k.Contains("Banner", StringComparison.OrdinalIgnoreCase)
-             && k.Contains("Material", StringComparison.OrdinalIgnoreCase)
-             && k.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
-    .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
-    .ToList();
-Console.WriteLine();
-Console.WriteLine($"----- Banner-related material assets found ({bannerCandidates.Count}) -----");
-foreach (var c in bannerCandidates) Console.WriteLine($"  {c}");
 
 Console.WriteLine($"Loading {assetPath} ...");
 var pkg = provider.LoadPackage(assetPath);
@@ -357,6 +351,14 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
             Console.WriteLine($"   TBasePassPSFNoLightMapPolicy (Quality={shaderMap.ShaderMapId.QualityLevel}) MaterialUniformBuffer.BaseIndex={basePassShader.MaterialParameters?.MaterialUniformBuffer.BaseIndex} bound={basePassShader.MaterialParameters?.MaterialUniformBuffer.bIsBound}");
             Console.WriteLine($"   all UniformBufferParameters: {string.Join(", ", basePassShader.UniformBufferParameters.Select(p => $"{(string.IsNullOrEmpty(p.Name) ? "(unnamed)" : p.Name)}@{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
         }
+
+        foreach (var s in allShaders.Where(s => s.TypeName.StartsWith("TBasePassPS", StringComparison.Ordinal)))
+        {
+            Console.WriteLine($"   DIAG '{s.TypeName}' MaterialUniformBuffer.BaseIndex={s.MaterialParameters?.MaterialUniformBuffer.BaseIndex} bound={s.MaterialParameters?.MaterialUniformBuffer.bIsBound}");
+            Console.WriteLine($"     NumVectorExpressions={s.MaterialParameters?.NumVectorExpressions} NumScalarExpressions={s.MaterialParameters?.NumScalarExpressions} Num2DTextureExpressions={s.MaterialParameters?.Num2DTextureExpressions} NumCubeTextureExpressions={s.MaterialParameters?.NumCubeTextureExpressions}");
+            Console.WriteLine($"     all UniformBufferParameters: {string.Join(", ", s.UniformBufferParameters.Select(p => $"{(string.IsNullOrEmpty(p.Name) ? "(unnamed)" : p.Name)}@{p.Parameter.BaseIndex}(bound={p.Parameter.bIsBound})"))}");
+            Console.WriteLine($"     Resource.OutputHash={s.Resource?.OutputHash} NumInstructions={s.Resource?.NumInstructions} Code.Length={s.Resource?.Code?.Length}");
+        }
     }
 
     Console.WriteLine();
@@ -403,13 +405,13 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     {
         Console.WriteLine($"  VectorParameterValues: {instanceConstant.VectorParameterValues.Length}");
         foreach (var v in instanceConstant.VectorParameterValues)
-            Console.WriteLine($"    {v.ParameterInfo.Name} = {v.ParameterValue}");
+            Console.WriteLine($"    {v.Name} = {v.ParameterValue} (ParameterInfo null={v.ParameterInfo == null})");
         Console.WriteLine($"  ScalarParameterValues: {instanceConstant.ScalarParameterValues.Length}");
         foreach (var s in instanceConstant.ScalarParameterValues)
-            Console.WriteLine($"    {s.ParameterInfo.Name} = {s.ParameterValue}");
+            Console.WriteLine($"    {s.Name} = {s.ParameterValue} (ParameterInfo null={s.ParameterInfo == null})");
         Console.WriteLine($"  TextureParameterValues: {instanceConstant.TextureParameterValues.Length}");
         foreach (var t in instanceConstant.TextureParameterValues)
-            Console.WriteLine($"    {t.ParameterInfo.Name} = {t.ParameterValue.Name}");
+            Console.WriteLine($"    {t.Name} = {t.ParameterValue.Name} (ParameterInfo null={t.ParameterInfo == null})");
     }
     else
     {

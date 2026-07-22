@@ -748,6 +748,335 @@ app — confirmed working (real hash → offset/size/frequency entries, matching
   Math" combiner rather than invented arithmetic; large shaders cap at 20,000 disassembly lines /
   2,500 expression-DAG nodes.
 
+## Pre-4.20-era (UE4.19) support
+
+Added in a later session to support an older Fortnite build. **Layer 1 works. Layer 2 (DXBC) does
+not, and is a substantially larger undertaking than it first appears — read "Layer 2 status" before
+picking this back up.**
+
+### Environment
+
+- Build: `V:\.builds\1.10\FortniteGame\Content\Paks`
+- Game version: `EGame.GAME_UE4_19`
+- AES key: `0x79323938716A53623131354E71513341676164333044576E3251597254493843`
+- Target asset used throughout:
+  `FortniteGame/Content/Athena/Prototype/Terrain/M_Athena_Fortress_Skybox_LF_Spinning_2` (a
+  `MaterialInstanceConstant`; its base material is `M_Athena_Fortress_Skybox_LF_Spinning`)
+- Engine source for ground-truth checks: `D:\Unreal Engine\UE_4.19\Engine\Source` — a **real, exact**
+  match for this build's engine version (unlike the 10.40/4.22-vs-4.23 approximation above), though
+  Fortnite's internal branch still shows small deviations from it in a couple of places (see
+  "unresolved" below) — likely Epic's own fork carrying unreleased/backported changes.
+
+### Why this needed a whole separate code path
+
+Everything in "Architecture" above (both layers) was written against confirmed UE 4.22/4.23 formats.
+At 4.19, almost nothing has the same byte layout — not because the *concepts* differ, but because
+the exact struct fields serialized changed release to release, and this reader has to match the
+byte layout exactly or it misreads garbage:
+
+- **The `.uasset`/`.uexp` wrapper is different**: pre-~4.22, `FMaterialResource::SerializeInlineShaderMap`
+  has no `FMaterialResourceProxyReader`-style local name-map/locs preamble at all — `ReadFName`/
+  `ReadFString` go straight to the archive's own (global, per-package) name table. See
+  `FMaterialResourceProxyReader.CreatePassthrough` / `IsPassthrough` — a second constructor path
+  added specifically for this, selected automatically as a fallback (see "Safe fallback" below).
+- **`FMaterialShaderMapId::Serialize` at 4.19 is enormous** compared to the simplified cooked form
+  used from ~4.22 on (just QualityLevel+FeatureLevel+Hash) — it inlines a full `FStaticParameterSet`,
+  `ReferencedFunctions`, `ReferencedParameterCollections`, and three dependency arrays, none of which
+  are modeled. Instead of modeling them, `FMaterialShaderMapIdLegacy.DeserializeVeryLegacy` skips the
+  fixed-size fields it knows (Usage/BaseMaterialId/QualityLevel/FeatureLevel) then anchor-scans
+  forward for the `ShaderPlatform`(int32)+`FriendlyName`(FString) pair that always follows — using an
+  **exact match** against the expected FriendlyName (not a generic "looks like a string" heuristic)
+  to make a false-positive practically impossible. See `TryScanForShaderPlatformAndFriendlyName`.
+  - **The expected FriendlyName is the root material's name, not the instance's own name.**
+    `FMaterialResource::GetFriendlyName()` (`MaterialShared.cpp:1073`) returns `GetNameSafe(Material)`
+    — for a `UMaterialInstance`'s own static-permutation resource, `Material` is the root `UMaterial`
+    it was compiled from, walked through however many levels of instancing. See the `Parent`-chain
+    walk added in `UMaterialInstance.Deserialize` right before the passthrough retry.
+- **`FUniformExpressionSet::Serialize` (the actual material-graph uniform expression tree) has a
+  different array set** at 4.19 (`MaterialUniformExpressions.cpp:102`): no volume-texture array, no
+  reserved "2D texture array" slot (both added later), and four now-removed "PerFrame"/"PerFramePrev"
+  arrays trail ParameterCollections. New `ELegacyShaderMapProfile.UE4_19` branch in
+  `FUniformExpressionSetLegacy`'s constructor.
+- **`FMaterialCompilationOutput::Serialize`** is nine flat 4-byte bools with no leading
+  `UsedSceneTextures`/estimate fields (`MaterialShared.cpp:346`) — but real cooked data only has 8
+  fields' worth of bytes before `DebugDescription`, one short of the 9 in source (see "unresolved,
+  not fatal" below). Handled by reading the first few reliably-positioned bools, then reusing the
+  **same anchor-scan technique** as `SkipToDebugDescription` (searching for `"Compiling <name>: "`)
+  instead of trying to guess the exact remaining byte count.
+- **Individual uniform expression types can carry undocumented extra bytes.** Two structurally
+  identical `FMaterialUniformExpressionVectorParameter` instances (both named `SelectionColor`) were
+  observed with *different* trailing byte counts (0 extra vs. 5 extra) — see "unresolved" below. Not
+  a fixed struct-layout difference; something conditionally present that isn't modeled. Solved
+  generically rather than precisely: `ResyncToNextExpressionAnchor` runs between every array element
+  for the UE4_19 profile, checking whether the current position is already a valid, registered
+  `FMaterialUniformExpressionType` name (8-byte FName, number 0, name starting with
+  `"FMaterialUniformExpression"`); if not, it scans forward a bounded window (64 bytes) for the next
+  position that is, and resyncs there. This is the same "validate, then anchor-scan if wrong"
+  philosophy as the rest of this format's handling — it doesn't require knowing *what* the extra
+  bytes are, only that a genuine anchor exists to recover from them.
+- **Custom-version-based Game fallback tables were wrong for this build's `GAME_UE4_19` bucket.**
+  `FRenderingObjectVersion.Get`/`FReleaseObjectVersion.Get`'s per-Game guess tables (used when a
+  package carries no explicit custom-version entry — true here, since Fortnite packages are
+  "unversioned" in the `bUnversioned` sense and never carry real per-package custom-version lists
+  regardless of era) both guessed a value *too high* for `GAME_UE4_19`, making
+  `UMaterialInstance.Deserialize`'s native `FStaticParameterSet` block get skipped entirely (wrong
+  `FRenderingObjectVersion` bucket) and then misread `FStaticMaterialLayersParameter` data that
+  doesn't exist yet at this patch (wrong `FReleaseObjectVersion` bucket). Both fixed by changing
+  **only** the `GAME_UE4_19` bucket (i.e. `< EGame.GAME_UE4_20`) to the same value as the `< GAME_UE4_19`
+  bucket — deliberately not touching any other bucket, since other titles/patches tagged
+  `GAME_UE4_19` were not investigated and might genuinely need the higher value. This is the one
+  compatibility-relevant change outside the passthrough-gated code paths; it's still zero-impact for
+  10.40 (`GAME_UE4_23`, a completely different bucket).
+- **There is no per-shader end-offset in `TShaderMap::SerializeInline` at 4.19** (`Shader.h:1841-1846`:
+  `Ar << Type; Shader = SerializeShaderForLoad(...)` — no skip value at all). The int64
+  "relative-to-`OffsetToFirstResource`" end-offset this reader relies on for 4.23-era unknown-shader
+  recovery **does not exist** in this format; it was added later specifically so unknown shader types
+  could be skipped safely. See "Layer 2 status" below — this is the crux of why Layer 2 doesn't work.
+
+### Safe fallback design (compatibility with 10.40 and everything else)
+
+Every new UE4.19 code path is reached *only* on the passthrough reader (`FMaterialResourceProxyReader
+.IsPassthrough`) or the new `ELegacyShaderMapProfile.UE4_19` enum value, both of which are only ever
+selected after the *existing* (4.22+/4.23) parse attempt throws — i.e. this is a pure fallback, never
+taken for a title whose current format already works. `UMaterial.Deserialize`/
+`UMaterialInstance.Deserialize` try the current format first, unchanged; only on exception do they
+retry from the same saved position with `usePassthrough: true`, clearing `LoadedMaterialResources`
+first to avoid partial contamination. Verified: 10.40's `M_FN_Character_MASTER` still decompiles
+identically after all these changes (see test harness section).
+
+### Layer 2 status: fully working for all 6 quality/feature-level resources of the test asset
+
+Once Layer 1 (`MaterialCompilationOutput`, including the real uniform expression tree) parses
+successfully, `FMaterialShaderMapLegacy.Deserialize` moves on to `Shaders = SerializeInline(Ar)` — the
+compiled-shader (DXBC) section, needed for Layer 2 pixel-shader reconstruction. This was chased over
+several long sessions across two root causes (below) and now produces full, richly-detailed
+reconstructed pixel shaders — real texture sampling, UV-animation math, distance-based contrast
+blending — for **all 6** of `M_Athena_Fortress_Skybox_LF_Spinning`'s quality/feature-level resources
+(Low/SM5, Epic/SM5, High/SM4_REMOVED, ×2 for the base material and the instance), not just the
+trivial Low-quality fallback (`Emissive_Color = max((Color(0.6, 0.6, 0.6, 0.6) + SelectionColor.rgb),
+Const(0, 0, 0, 0));`) originally found. Every named parameter's value and the overall expression shape
+matches the 10.40 (4.23-era) decompile of the same asset exactly (period-appropriate constant
+differences aside — e.g. Low quality's `0.6` here vs. `1` on 10.40, confirmed a genuine earlier-build
+value via Layer 1's own independent uniform-expression dump, not a parsing error). In order of
+discovery:
+
+1. **Missing per-shader end offset (the actual root cause of most of what follows).** UE_4.19's
+   `TShaderMap::SerializeInline` DOES write 4 bytes between the type name and every shader's own fields
+   — it was missed on first pass because the wrapper visible at `Shader.h:1841-1846` only shows
+   `Ar << Type; Shader = SerializeShaderForLoad(...)`, making it look like there's no skip mechanism at
+   all. The offset is written one level down, inside `SerializeShaderForLoad`/`SerializeShaderForSaving`
+   (`Shader.h:1713-1772`): `int32 SkipOffset = Ar.Tell(); Ar << SkipOffset; ...
+   CurrentShader->SerializeBase(Ar, ...); int32 EndOffset = Ar.Tell(); Ar.Seek(SkipOffset); Ar <<
+   EndOffset;` — the same "placeholder overwritten with `Ar.Tell()` at save time" pattern already known
+   from `FVertexFactoryParameterRef`'s own skip offset. Missing this field meant *every* UE4_19 shader's
+   own fields (starting with `FMaterialShader::Serialize`'s `MaterialUniformBuffer`, the very first
+   thing read) were being read 4 bytes early — garbage `BaseIndex` values, or an outright "Invalid bool
+   value" throw when the misread bits didn't decode as 0/1. This one fix cascaded into correcting two
+   things that had previously been (wrongly) explained as independent findings:
+   - The "`FDebugUniformExpressionSet` is 22 bytes not 24" empirical patch (previously point 6 here) was
+     never a real field-size difference — it was compensating for accumulated drift caused by this same
+     missing 4 bytes interacting with `ParameterCollectionUniformBuffers`'s own (also-misread) count.
+     Once the real bug was fixed, the 22-byte skip started overshooting into the *next* shader's data;
+     reverted to the vanilla 24-byte, 6×`int32` model.
+   - The "`InstanceCount`/`InstanceOffset`/`VertexOffset` don't exist" finding (previously point 7)
+     turned out to be a *separate, still-real* finding — re-confirmed after the above two fixes:
+     restoring those 18 bytes still overshoots `VertexFactoryTypeName` by exactly their own length, so
+     this Fortnite branch genuinely predates them.
+   The raw offset value read here does not reproduce a usable position for this cook (tried both
+   absolute and `OffsetToFirstResource`-relative interpretations; neither lands anywhere near the real
+   shader boundary, independently confirmed via the anchor scan below finding the true end thousands of
+   bytes earlier) — so the 4 bytes are consumed (fixing the alignment) but not trusted for jumping.
+   Recovery for shader types this reader can't parse directly still goes through the anchor scan:
+   `ReadUnknownTypeUnbounded` scans forward (bounded to 128KB) for the shader's own type name
+   reappearing 76 bytes before a tail that deserializes cleanly (same anchor idea as
+   `ReadUnknownTypeFromTail`, just without a known end position to bound the scan or prove
+   uniqueness — accepts the first candidate whose tail fully validates).
+2. **`FMaterialShader::Serialize` (`ShaderBaseClasses.cpp:447-487`) is a substantially different,
+   larger structure at 4.19** than the 4.23-era one this reader already modeled for `TBasePassPS*`.
+   Implemented field-by-field in `DeserializeMaterialShaderFront_UE4_19`, confirmed against every
+   referenced struct's own `operator<<`/class declaration in engine source:
+   `MaterialUniformBuffer`(6B) → `ParameterCollectionUniformBuffers`(array) →
+   `FDeferredPixelShaderParameters` (**146 bytes fixed**: `FSceneTextureShaderParameters`'s 14
+   `FShaderResourceParameter`s = 56B + `GBufferResources` 6B + **21** more `FShaderResourceParameter`s
+   = 84B — the class's own field list reads as 20 at a glance because `CustomStencilTexture` trails on
+   its own line in the header; recount from the `operator<<` body, not the field list, for any class
+   like this) → `SceneColorCopyTexture(Sampler)`(8B) → `FDebugUniformExpressionSet` (24B, 6×`int32`,
+   non-declaration field *order* — see `MaterialShader.h:90-99`) → inline `FRHIUniformBufferLayout`
+   (`LayoutName` FName + `ConstantBufferSize` uint32 + a **single** `ResourceOffset` uint32, NOT an
+   array — `RHIResources.h:196-203` — + `Resources` `TArray<uint8>`) → `DebugDescription` →
+   `EyeAdaptation`(4B) → four "PerFrame"/"PerFramePrev" `TArray<FShaderParameter>`s →
+   `InstanceCount`/`InstanceOffset`/`VertexOffset`(6B each). New primitives added:
+   `FShaderResourceParameterLegacy` (4B: `BaseIndex`+`NumResources`, both `uint16`) and
+   `FShaderParameterLegacy` (6B: `BaseIndex`+`NumBytes`+`BufferIndex`, all `uint16`).
+3. **`FShaderResource::Serialize` at 4.19 (`Shader.cpp:480-499`) has no `FShaderParameterMapInfo` at
+   all** — that's a later addition alongside the reflection-based parameter-binding system. Instead it
+   reads a plain `uint32 NumTextureSamplers` in that exact spot. Confirmed by the function's own body
+   containing no reference to a parameter map whatsoever.
+4. **`FShader::SerializeBase` ends immediately after the inline `FShaderResource::Serialize` call**
+   (`Shader.cpp:1011-1041`) — there is no trailing `FShaderParameterBindings` block (9 arrays +
+   `RootParameterBufferIndex`) at 4.19 at all; that whole reflection-based system is a later addition.
+   `DeserializeBaseTail` now skips this entire tail for the `UE4_19` profile.
+5. **`ShaderResourceCodeSharing` is enabled for this build** (`FRenderingObjectVersion` index 15) even
+   though the blanket `GAME_UE4_19` fallback used elsewhere (`VolumetricLightmaps`, index 20 — needed
+   for the `FStaticParameterSet`/`MaterialAttributeLayerParameters` gating described above) sits above
+   it — a single substitute value can't correctly gate both checks, so `FShaderResourceLegacy` now
+   special-cases `UE4_19` directly at both `ShaderResourceCodeSharing` gates: skip the first inline
+   `Code` read, then read `bCodeShared` (bool) and the *real* `Code` array after
+   `uncompressedCodeSize` — confirmed correct by finding a real zlib-header-prefixed
+   (`789C`) compressed bytecode blob exactly where this predicts it, whose length prefix (1193 bytes)
+   exactly matched the gap to the next shader's anchor.
+
+With all five fixed, **all material shaders of the test asset now parse correctly**, including real
+decompressed DXBC bytecode. Mesh shaders (`TBasePassPS*` — the shader that actually matters for the
+material's own per-pixel graph) needed several more rounds:
+
+6. See point 1 above — the real `FDebugUniformExpressionSet` size is the vanilla 24 bytes; an earlier
+   "22 bytes" reading was a byproduct of the missing end-offset, not a genuine field-size difference.
+7. See point 1 above — `InstanceCount`/`InstanceOffset`/`VertexOffset` (18 bytes, the very end of
+   `FMaterialShader::Serialize`) genuinely don't exist on this build, re-confirmed after point 1's fix.
+   This Fortnite branch's `FMaterialShader::Serialize` predates GPU-instancing support for material
+   shaders (these three fields feed `DrawIndexedInstanced` args in `FMeshMaterialShader::SetMesh`), so
+   an early 1.10-era snapshot simply doesn't have them yet.
+8. **`FVertexFactoryParameterRef`'s stored skip offset is never followed when the VF type resolves.**
+   The write side (`VertexFactory.cpp:336-393`) always records `Ar.Tell()` there, but the *read* side
+   only seeks to it as a fallback when `FindVertexFactoryType(name)` returns null; when the type
+   resolves — as `FLocalVertexFactory` (by far the most common VF for static-mesh materials) always
+   does — the engine instead reads that type's own `FVertexFactoryShaderParameters` subclass in place
+   and never looks at the stored offset at all. Chasing the "absolute vs. `OffsetToFirstResource`-relative"
+   interpretation of that offset was a dead end for exactly this reason — neither interpretation was
+   ever going to be right for a resolved VF type. `FLocalVertexFactoryShaderParameters::Serialize`
+   (`LocalVertexFactory.cpp:44-53`) is now read directly: `bAnySpeedTreeParamIsBound` (bool, 4B) +
+   `LODParameter` (6B) + `VertexFetch_VertexFetchParameters` (6B) + four
+   `VertexFetch_*BufferParameter`s (4B each) = 32B fixed. Unrecognized VF types still fall back to the
+   two skip-offset interpretations (tried in order, each validated against `DeserializeBaseTail`'s own
+   `TypeName`/`Target.Frequency` anchor) since a VF this reader doesn't special-case can't be read any
+   other way yet.
+9. **The four param-struct byte counts (134/66/70/78, all derived field-by-field from engine source and
+   individually correct per struct — see point 2's sibling analysis) summed to 30 bytes more than what
+   was actually on disk before point 1's fix.** `DeserializeTBasePassPS_UE4_19` resyncs onto
+   `DeserializeBaseTail`'s own `TypeName`/`Target.Frequency` anchor within a small window (±64 bytes)
+   around the computed tail position rather than trusting the raw sum, exactly like the unknown-type
+   recovery paths already do — this safety net is left in place (see below) since the four struct sizes
+   still aren't independently byte-verified, but with point 1 fixed the resync's own delta shrank
+   drastically (no longer re-measured precisely after the fix; treat the old "consistently -30" figure
+   as describing the pre-fix state only, not a currently-accurate number).
+
+**`TBasePassPS*` now fully parses end-to-end AND produces a real, correctly-structured reconstructed
+pixel shader body**, confirmed against `M_Athena_Fortress_Skybox_LF_Spinning`'s
+`TBasePassPSFNoLightMapPolicy` (Quality=Low):
+`Emissive_Color = max((Color(0.6, 0.6, 0.6, 0.6) + SelectionColor.rrr), Const(0, 0, 0, 0));` — matching
+the "else" branch of the same shader/asset's 10.40 (4.23-era) decompile
+(`max((Color(1, 1, 1, 1) + SelectionColor.rgb), Const(0, 0, 0, 0))`) with a plausible period-correct
+constant difference (this is genuinely an earlier build of the same material, not a parsing artifact —
+confirmed by Layer 1's own uniform-expression dump independently showing the same `0.6` constant).
+Getting here also fixed, as a side effect, an earlier-documented cosmetic gap where `cb0[2]`-style
+constant-buffer reads printed as a bare `0` comment instead of resolving to the named uniform
+expression at that slot: that was downstream of `MaterialUniformBuffer` (and therefore the whole
+constant-buffer-to-parameter mapping) reading garbage due to point 1's bug, not a separate bug in
+`MapSinksToPins`/`PinSources`/`PinExpressions` resolution as previously suspected. The genuinely
+separate, already-fixed `PixelShaderDecompiler.DecompileOneResource` issue (iterating only
+`PinSources.Keys` instead of the union of `PinSources`/`PinExpressions`/`PinDisassembly` keys, so a pin
+resolved only in `PinExpressions` was silently never printed) remains fixed and is unrelated to point 1.
+
+**Safety net (still needed — several of the fixes above are validated only via anchor/position
+resync, not exact byte modeling, so a shader this reader hasn't seen yet can still fail):** the
+material-shaders array, the `MeshShaderMaps` loop, and the per-resource loop in
+`UMaterialInterface.DeserializeInlineShaderMaps` all catch a `UE4_19`-profile parse failure
+non-fatally. `SerializeInline`'s own per-shader loop (used by both of the above) now also catches a
+mid-array failure and throws a `PartialShaderArrayException` carrying whatever shaders it parsed
+before the bad one, so a single unrecognized permutation in a 7-shader VS+PS array doesn't lose the
+other 4+ that parsed fine (an earlier version of this fix instead silently `break`-ed and let the
+caller keep reading `numPipelines` etc. from the now-garbage position, which corrupted the rest of the
+parse worse than not catching at all — the exception-with-partial-payload approach avoids that by
+still stopping the caller at exactly the point of failure). `MeshShaderMaps` is built as a `List` and
+only converted to an array at the end specifically so a partial failure never leaves `null` entries for
+callers to trip over.
+
+### If picking Layer 2 back up
+
+Known open gaps:
+
+1. **The reconstructed `Emissive_Color` is missing the outer conditional present in 10.40's decompile**
+   (`_0.z ? _7.xyz : _6.xyz` there — an `OutOfBoundsMask`/debug-selection-color branch — vs. just the
+   "else" side, `_6`, here). Not yet root-caused whether this is a genuine difference in this older
+   build's compiled shader (plausible — different engine era, different codegen, possibly this branch
+   simply didn't exist yet) or a remaining gap in this reader's own instruction decoding/branch
+   reconstruction. Compare `NumInstructions` between the two builds' equivalent shader and/or dump the
+   raw DXBC disassembly (`PixelShaderDecompiler.AnalyzeForDiagnostics`'s `Wiring.PinDisassembly`, already
+   exposed by the test harness) to see whether the branch instructions are present in the bytecode at
+   all before assuming either explanation.
+2. **The material's other quality-level resources (2nd through 6th of 6) were being dropped entirely,
+   and it was briefly — wrongly — reported that the higher quality level didn't exist in this cook at
+   all. It does; this was a real bug, now fixed, plus one more real bug found immediately downstream.**
+   - Root cause #1: `FMaterial::SerializeInlineShaderMap` (confirmed against `MaterialShared.cpp:712-760`)
+     is `bCooked; if(bCooked){ bValid; if(bValid){ shader map } }` per resource, with **no per-resource
+     end offset at all** — so once one resource's own total byte count is even slightly off (this
+     reader's UE4_19 byte layout still isn't fully verified everywhere), every resource after it reads
+     from an unrecoverable position, and the old code just gave up on the whole rest of the array
+     (`UMaterialInterface.DeserializeInlineShaderMaps`, passthrough branch). Fixed by adding a resync:
+     every resource of the same `UMaterial` shares an identical, verbatim-repeated `BaseMaterialId`
+     GUID (previously read and discarded in `FMaterialShaderMapIdLegacy.DeserializeVeryLegacy` — now
+     captured as `BaseMaterialIdFromVeryLegacyScan`), so on a per-resource parse failure,
+     `UMaterialInterface.TryResyncViaBaseMaterialId` scans forward for that exact 16-byte sequence
+     reappearing and resumes from there instead of giving up on every remaining resource.
+   - Root cause #2, found immediately after #1 via that exact resync: the backward offset from the
+     `BaseMaterialId` match to the resource's own start was wrong by 4 bytes — `candidateStart = matchPos
+     - 8` assumed only `bCooked(4)+bValid(4)` precede the GUID, forgetting the `Usage(4)` field that
+     `FMaterialShaderMapIdLegacy.DeserializeVeryLegacy` also reads (and discards) immediately before it.
+     This meant every "successful" resync was landing 4 bytes late — reading the resource's real
+     `bValid` flag as if it were `bCooked` (which happened to decode as a plausible value most of the
+     time), and `Usage` (always observed as 0) as if it were `bValid` — so recovery always "succeeded"
+     into a fake, empty resource instead of the real one right next to it. This is what produced the
+     mistaken "confirmed: this quality level doesn't exist in the cook" conclusion — the resync was
+     firing and reporting success, just onto the wrong 4-byte-shifted position every time. Fixed:
+     `candidateStart = matchPos - 12`.
+   - With both fixed, the material's other resources are real, `bValid=true`, cooked shader maps that
+     start parsing correctly (matching `QualityLevel`/`FeatureLevel`, resolving the `FriendlyName`
+     anchor, resolving several real `FMaterialUniformExpressionVectorParameter`/`ScalarParameter`
+     nodes) — confirming the higher quality level genuinely is present in this 1.10 cook, exactly as
+     expected from comparing against the 10.40 reference for the same asset.
+   - **A third, separate bug was found and fixed: `FMaterialParameterInfo` itself predates the vanilla
+     4.19-onward layout in this Fortnite branch.** The vanilla struct (`FName Name(8B) + TEnumAsByte
+     Association(1B) + int32 Index(4B)`, 13B total, confirmed against `MaterialUniformExpressions.h:
+     208-227`/`MaterialLayersFunctions.h:56-60`) does not match this build at all. Root-caused
+     conclusively by cross-referencing the 10.40 (4.23-era) JSON dump of this exact asset: every single
+     scalar/vector parameter there has `ParameterAssociation=2` (`GlobalParameter`) and
+     `ParameterIndex=-1` - i.e. this era's materials never actually use per-layer indexing, so those two
+     fields are meaningless overhead in the cooked data - and then finding each parameter's own real
+     default value (exact bit-for-bit float matches - `Speed_1`=`1.368582`, `DistanceFunction`=`80000`,
+     `Speed_2`=`7.003327`, etc.) sitting exactly **8 bytes** after that parameter's own `FName`, not 13.
+     The real layout is just a plain `FName` (8B: name index + number - e.g. `Speed_2` is stored as base
+     name `"Speed"` with `Number` encoding the `_2` suffix per `FName`'s own "stored as 1 more than
+     actual" convention, `FName.cs:20-23`) with **no separate Association or Index field at all**;
+     `ReadParameterInfo` now branches on `UE4_19` to read just `Ar.ReadFName().Text` and hardcode
+     `ParameterAssociation = 2` / `ParameterIndex = -1` to match every real instance observed. Reading
+     the vanilla 13-byte layout was overshooting by 5 bytes into the very next array element every
+     time, which is exactly why every *other* scalar/vector parameter appeared to silently vanish from
+     the array (`ReadExpressionArray`'s own resync recovered by skipping an entire extra element to find
+     the next valid type name, rather than realigning within the current one) - and it explains, in
+     hindsight, the session's own much earlier, never-resolved "`FMaterialUniformExpressionVectorParameter`
+     sometimes has 0 extra bytes, sometimes 5" note: 5 bytes is exactly the vanilla-vs-real difference
+     for this struct, so that was this exact bug being seen for the first time and dismissed as noise.
+     Confirmed fixed end-to-end: `M_Athena_Fortress_Skybox_LF_Spinning`'s Epic and High-quality
+     resources now produce full, richly-detailed reconstructed pixel shaders (real texture sampling,
+     UV-animation math, distance-based contrast blending - not just the trivial "else"-branch constant
+     Low quality falls back to), matching the shape and every named-parameter value of the 10.40
+     reference for the same asset. Two related fixes were added while chasing this and remain useful
+     independent of this specific bug: (a) the trailing-bytes resync also now runs *between sibling
+     operands* inside a compound expression node (`FoldedMath`/`TrigMath`/`Min`/`Max`/`Clamp`/
+     `AppendVector`/`Fmod`'s "A"/"B" or "X"/"Y" pairs, via
+     `FMaterialUniformExpressionLegacy.ResyncBetweenOperands`) rather than only between top-level array
+     elements, since a leaf parameter nested as an operand can carry the same kind of quirk; (b) a
+     per-element `Log.Verbose` trace (type name + parameter name + position) remains in
+     `ReadExpressionArray` as a low-cost breadcrumb for any future investigation of this kind.
+
+Beyond those two, `LegacyShaderMap.cs`'s byte layout is done for the one VF type (`FLocalVertexFactory`)
+and one light-map-policy family this session had real data for. If a *different* VF type or light-map
+policy is needed later, extend `DeserializeTBasePassPS_UE4_19`'s VF-type dispatch (currently only
+`FLocalVertexFactory`) and the `BasePassPixelPolicyParamCountsUE4_19` dictionary (currently only the
+plain `TUniformLightMapPolicy`-based policies, all mapped to 1 field — the three `FSelfShadowed*`
+policies use a different `PixelParametersType` not yet confirmed for 4.19) the same way.
+
 ## Test harness
 
 `ShaderDecompileTest/` (standalone console project, `Program.cs` 193 lines) — mounts the real

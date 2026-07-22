@@ -108,7 +108,18 @@ public static class PixelShaderDecompiler
             .Append(" | reconstructed from the compiled DXBC pixel shader").AppendLine();
         sb.AppendLine();
 
-        var orderedPins = wiring.PinSources.Keys.OrderBy(p => p, StringComparer.Ordinal).ToList();
+        // PinSources (the taint-analysis sink map) and PinExpressions (the separate expression-DAG
+        // builder) usually agree on which pins exist, but aren't guaranteed to - a shader with an
+        // unusual output-register layout (e.g. a single-target Unlit base pass instead of the full
+        // 4-target GBuffer) can make the sink-detection heuristic in MapSinksToPins come up empty for
+        // a pin that BuildPinExpressions still resolved correctly. Iterate the union of every source
+        // that names a pin so one detector's gap doesn't silently hide the other's result.
+        var orderedPins = wiring.PinSources.Keys
+            .Concat(wiring.PinExpressions.Keys)
+            .Concat(wiring.PinDisassembly.Keys)
+            .Distinct()
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
 
         // The expression DAG hash-conses repeated subtrees (the same constant-buffer read or the
         // same sub-computation can be reached from many places, e.g. a shared UV computation feeding
