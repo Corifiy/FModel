@@ -127,7 +127,7 @@ public static class PixelShaderDecompiler
         // every node reached more than once across the whole shader is hoisted into a named
         // declaration up front, in dependency order, and every other reference to it becomes just
         // that name - this is a straightforward CSE pass over the DAG, not a rewrite of it.
-        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel);
+        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel, shaderMap.ParsedProfile);
         var recursed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
@@ -249,12 +249,13 @@ public static class PixelShaderDecompiler
     /// shared) expression DAG so a subtree reached from many places is declared once and referenced
     /// by name everywhere else, instead of being fully re-expanded at every occurrence.
     /// </summary>
-    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures, ERHIFeatureLevel featureLevel)
+    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures, ERHIFeatureLevel featureLevel, ELegacyShaderMapProfile legacyProfile)
     {
         public readonly UMaterialInterface Material = material;
         public readonly FUniformExpressionSetLegacy ExpressionSet = expressionSet;
         public readonly IReadOnlyList<UTexture?>? ReferencedTextures = referencedTextures;
         public readonly ERHIFeatureLevel FeatureLevel = featureLevel;
+        public readonly ELegacyShaderMapProfile LegacyProfile = legacyProfile;
         public readonly MaterialShaderDecompiler.InstanceParameterOverrides Overrides = MaterialShaderDecompiler.InstanceParameterOverrides.Build(material);
         public readonly Dictionary<int, MaterialParameterCollectionResolver.ResolvedCollection?> CollectionCache = new();
         public readonly Dictionary<int, int> LeftoverCbRegisterToCollectionIndex = new();
@@ -685,22 +686,33 @@ public static class PixelShaderDecompiler
     /// swizzle will pick, so all of them are shown instead - the same "don't guess the swizzle" rule
     /// TryDescribeCollectionRow's scalar branch already follows for Parameter Collection rows.
     ///
-    /// Gated to SM5 only: a real ERHIFeatureLevel.SM4_REMOVED resource in this same cooked material
-    /// (M_FN_Character_MASTER, Quality=Medium) showed every one of several independently-verified
-    /// rows (PreViewTranslation, the SVPositionToTranslatedWorld reconstruction matrix,
-    /// NormalOverrideParameter, the GameTime-driven sin-pulse row) shifted by exactly 4 rows (one
-    /// whole FMatrix) versus this table - i.e. this table is only confirmed to match the SM5 cbuffer
-    /// layout. Rather than guess which of the ~10 leading matrices SM4's struct is missing (would need
-    /// a period-correct engine source snapshot this session doesn't have), any non-SM5 feature level
-    /// falls through to the existing honest "cb{N}[{row}]" placeholder instead of a confidently wrong
-    /// name.
+    /// Gated to SM5 only for the vanilla (non-UE4_19) table: a real ERHIFeatureLevel.SM4_REMOVED
+    /// resource in this same cooked material (M_FN_Character_MASTER, Quality=Medium) showed every one
+    /// of several independently-verified rows (PreViewTranslation, the SVPositionToTranslatedWorld
+    /// reconstruction matrix, NormalOverrideParameter, the GameTime-driven sin-pulse row) shifted by
+    /// exactly 4 rows (one whole FMatrix) versus this table - i.e. this table is only confirmed to
+    /// match the SM5 cbuffer layout. Rather than guess which of the ~10 leading matrices SM4's struct
+    /// is missing (would need a period-correct engine source snapshot this session doesn't have), any
+    /// non-SM5 feature level falls through to the existing honest "cb{N}[{row}]" placeholder instead
+    /// of a confidently wrong name.
+    ///
+    /// UE4_19-profile shader maps use a *separate* pair of tables (ViewRowsUE4_19/PrimitiveRowsUE4_19)
+    /// instead, with no feature-level restriction: the underlying C++ struct is a single fixed type
+    /// per engine build regardless of which feature level a given shader targets, so once the
+    /// struct's own 4.19 field layout is known there's no SM4-vs-SM5 ambiguity the way there is for
+    /// the vanilla (4.2x+) table above. See EngineUniformBufferLayout.cs for how those tables were
+    /// derived and why they differ from the ones above (missing ClipToWorld matrix, missing
+    /// DeltaTime/StateFrameIndex scalars, a smaller/differently-laid-out Primitive struct with no
+    /// motion-vector or lightmap-data-index fields yet).
     /// </summary>
     private static readonly Regex EngineBufferCbPattern = new(@"^(?<buf>[A-Za-z0-9_]+) cb\d+\[(?<row>\d+)\]$", RegexOptions.Compiled);
 
     private static bool TryDescribeEngineBufferRow(string? detail, PrintCtx ctx, out string result)
     {
         result = "";
-        if (string.IsNullOrEmpty(detail) || ctx.FeatureLevel != ERHIFeatureLevel.SM5) return false;
+        if (string.IsNullOrEmpty(detail)) return false;
+        var isUE4_19 = ctx.LegacyProfile == ELegacyShaderMapProfile.UE4_19;
+        if (!isUE4_19 && ctx.FeatureLevel != ERHIFeatureLevel.SM5) return false;
         var match = EngineBufferCbPattern.Match(detail);
         if (!match.Success) return false;
 
@@ -708,8 +720,8 @@ public static class PixelShaderDecompiler
         var row = int.Parse(match.Groups["row"].Value);
         var (prefix, table) = bufferName switch
         {
-            "FViewUniformShaderParameters" => ("View", EngineUniformBufferLayout.ViewRows),
-            "FPrimitiveUniformShaderParameters" => ("Primitive", EngineUniformBufferLayout.PrimitiveRows),
+            "FViewUniformShaderParameters" => ("View", isUE4_19 ? EngineUniformBufferLayout.ViewRowsUE4_19 : EngineUniformBufferLayout.ViewRows),
+            "FPrimitiveUniformShaderParameters" => ("Primitive", isUE4_19 ? EngineUniformBufferLayout.PrimitiveRowsUE4_19 : EngineUniformBufferLayout.PrimitiveRows),
             _ => (null, null),
         };
         if (table == null || !table.TryGetValue(row, out var comps)) return false;
