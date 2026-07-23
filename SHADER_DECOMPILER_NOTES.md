@@ -1,5 +1,4 @@
 # Decompile Shader — Implementation Notes
-
 Complete working notes for the "Decompile Shader" feature added to FModel: reconstructs
 C++-style pseudocode for a cooked `UMaterial`/`UMaterialInstance`, using two independent,
 complementary decompilation layers. This is a full rewrite consolidating everything learned
