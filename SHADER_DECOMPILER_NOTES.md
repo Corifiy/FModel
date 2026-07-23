@@ -1070,12 +1070,49 @@ Known open gaps:
      per-element `Log.Verbose` trace (type name + parameter name + position) remains in
      `ReadExpressionArray` as a low-cost breadcrumb for any future investigation of this kind.
 
-Beyond those two, `LegacyShaderMap.cs`'s byte layout is done for the one VF type (`FLocalVertexFactory`)
-and one light-map-policy family this session had real data for. If a *different* VF type or light-map
-policy is needed later, extend `DeserializeTBasePassPS_UE4_19`'s VF-type dispatch (currently only
-`FLocalVertexFactory`) and the `BasePassPixelPolicyParamCountsUE4_19` dictionary (currently only the
-plain `TUniformLightMapPolicy`-based policies, all mapped to 1 field — the three `FSelfShadowed*`
-policies use a different `PixelParametersType` not yet confirmed for 4.19) the same way.
+### Additional VF types (found testing against `CharacterShader`, a skeletal-mesh master material)
+
+`M_Athena_Fortress_Skybox_LF_Spinning`'s only VF type is `FLocalVertexFactory` (static mesh). Testing
+against `FortniteGame/Content/Packages/Fortress_SharedMaterials/Base_Material/CharacterShader` (a
+much larger, widely-shared skeletal character material) immediately hit several VF types that reader
+had no case for at all, each one throwing and dropping the rest of that resource's material-shaders
+array via the existing per-shader safety net. All confirmed and fixed by reading the actual
+`ConstructShaderParameters`/`Serialize` bodies in `GPUSkinVertexFactory.cpp`:
+
+- **`TGPUSkinVertexFactory<bool>`** (plain skeletal mesh, type name observed as
+  `TGPUSkinVertexFactorytrue`/`...false` — the template bool is appended to the type name) uses
+  `FGPUSkinVertexFactoryShaderParameters::Serialize` (`GPUSkinVertexFactory.cpp:496-501`): `PerBoneMotionBlur`
+  (`FShaderParameter`, 6B) + `BoneMatrices` + `PreviousBoneMatrices` (2× `FShaderResourceParameter`, 4B
+  each) = 14B fixed, no arrays.
+- **`TGPUSkinMorphVertexFactory<bool>`** (morph-target skeletal mesh) — confirmed via
+  `TGPUSkinMorphVertexFactory::ConstructShaderParameters` (`GPUSkinVertexFactory.cpp:744-748`) to
+  construct the exact same `FGPUSkinVertexFactoryShaderParameters` as the plain variant, byte-for-byte
+  identical — no separate case needed beyond matching the type-name prefix too.
+- **`TGPUSkinAPEXClothVertexFactory<bool>`** (cloth-simulated skeletal mesh) extends the base with 6
+  more fields (`GPUSkinVertexFactory.cpp:780-789`, field types confirmed from the class's own member
+  declarations at `:854-859`): `ClothSimulVertsPositionsNormalsParameter` + `PreviousClothSimulVertsPositionsNormalsParameter`
+  (`FShaderResourceParameter`, 4B each) + `ClothLocalToWorldParameter` + `ClothBlendWeightParameter`
+  (`FShaderParameter`, 6B each) + `GPUSkinApexClothParameter` (`FShaderResourceParameter`, 4B) +
+  `GPUSkinApexClothStartIndexOffsetParameter` (`FShaderParameter`, 6B) = 30B on top of the base 14B,
+  44B total.
+- **`FMeshParticleVertexFactory`** (mesh particles) was also encountered in this same asset and is
+  *not* yet modeled — it still falls back to the generic two-skip-offset guess (untested, unlikely to
+  work) and gets dropped by the safety net like any other unrecognized type. This did not block
+  `CharacterShader`'s own `TBasePassPSFNoLightMapPolicy` reconstruction (a `FLocalVertexFactory`/GPUSkin
+  permutation earlier in the same 33-shader array already succeeded), so it wasn't chased further, but
+  add it the same way if a mesh-particle-specific permutation is ever the one that's needed.
+
+Also discovered and fixed in the same pass: **`FMaterialUniformExpressionTime`/`RealTime`** (a
+"Time"/"RealTime" material-graph node) were two more previously-unmodeled uniform expression types —
+both are genuine no-op leaf nodes at this engine version (`MaterialUniformExpressions.h:62-116`, empty
+`Serialize` bodies, zero fields) - trivial to add once identified as the actual cause (rather than a
+byte-alignment bug) by the "unknown expression type" diagnostic already in place.
+
+Beyond all of the above, `LegacyShaderMap.cs`'s light-map-policy byte layout is still only confirmed
+for the plain `TUniformLightMapPolicy`-based policies (`BasePassPixelPolicyParamCountsUE4_19`, all
+mapped to 1 field) — the three `FSelfShadowed*` policies use a different `PixelParametersType` not yet
+confirmed for 4.19, and would need the same kind of investigation if one turns up as the shader a
+future asset actually needs reconstructed.
 
 ## Test harness
 
