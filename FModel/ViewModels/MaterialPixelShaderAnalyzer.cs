@@ -713,8 +713,12 @@ public static class MaterialPixelShaderAnalyzer
             return wiring;
         }
 
-        // FShaderLegacy only decodes base-pass pixel shader layouts, so every shader with
-        // MaterialParameters here is a TBasePassPS permutation (SF_Pixel == 3)
+        // At UE4_19, non-base-pass FMeshMaterialShader-derived pixel shaders (translucency shadow
+        // depth, velocity, hit proxy, lightmap density, ...) now also populate MaterialParameters
+        // (LegacyShaderMap.cs's DeserializeMeshMaterialShaderFront_UE4_19 recovers their front matter
+        // too, not just TBasePassPS's), so MaterialParameters != null alone no longer implies
+        // "base-pass". Require the TBasePassPS type-name prefix explicitly - this is the only shape
+        // this analyzer's GBuffer/forward-output wiring logic below is built to understand.
         var candidates = new List<FShaderLegacy>();
         var seenBytecode = new HashSet<string>();
         void Visit(FShaderLegacy[] shaders)
@@ -722,6 +726,7 @@ public static class MaterialPixelShaderAnalyzer
             foreach (var shader in shaders ?? [])
             {
                 if (shader?.MaterialParameters == null || shader.Target.Frequency != 3) continue;
+                if (!shader.TypeName.StartsWith("TBasePassPS", StringComparison.Ordinal)) continue;
                 if (shader.TypeName.IndexOf("Mobile", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                 if (!seenBytecode.Add(shader.Resource?.OutputHash.ToString() ?? shader.TypeName)) continue;
                 candidates.Add(shader);
@@ -1243,6 +1248,181 @@ public static class MaterialPixelShaderAnalyzer
         }
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Analyzes a legacy vertex shader's compiled DXBC bytecode, producing one recovered
+    /// expression per output register keyed by its semantic name (SV_Position, TEXCOORD0, …) -
+    /// the same "stage mode" of <see cref="BuildPinExpressions"/> already used to populate
+    /// <see cref="ShaderStageGroup.OutputExpressions"/> for the shader-map overview, called
+    /// directly here so WorldPositionOffset (see <see cref="TryExtractWorldPositionOffset"/>) can
+    /// be recovered from the base-pass VERTEX shader - WPO is computed entirely there and never
+    /// reaches the pixel shader's own bytecode.
+    /// </summary>
+    public static Dictionary<string, PixelExpressionNode> AnalyzeVertexShaderLegacy(FShaderLegacy shader, byte[] blob, FUniformExpressionSetLegacy expressionSet)
+    {
+        var results = new Dictionary<string, PixelExpressionNode>();
+        if (blob == null || blob.Length == 0) return results;
+
+        var pos = 0;
+        ReadU32(blob, ref pos); // ResourceTableBits
+        var srvMap = ReadResourceMap(blob, ref pos);
+        ReadResourceMap(blob, ref pos); // SamplerMap
+        ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
+        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var textureMap = ReadResourceMap(blob, ref pos);
+        if (!HasDxbcMagic(blob, pos)) return results;
+
+        if (!TryParseDxbcContainer(blob, pos, out var outputRegToTarget, out var program, out var inputSemantics, out var outputSemantics, out _))
+            return results;
+        if (program[0] >> 16 != 1) return results; // D3D10_SB_TOKENIZED_PROGRAM_TYPE: 1 = vertex shader
+
+        var instructions = DecodeProgram(program, out _, out var resourceDimensions);
+
+        var vtStackCount = expressionSet.VTStacks?.Length ?? 0;
+        var virtualCount = expressionSet.UniformVirtualTextureExpressions?.Length ?? 0;
+        var vecCount = expressionSet.UniformVectorExpressions?.Length ?? 0;
+        var scalarCount = expressionSet.UniformScalarExpressions?.Length ?? 0;
+        var vecBase = vtStackCount * 32 + virtualCount * 16;
+        var scalarBase = vecBase + vecCount * 16;
+
+        var materialSlot = shader.MaterialParameters?.MaterialUniformBuffer.bIsBound == true
+            ? shader.MaterialParameters.MaterialUniformBuffer.BaseIndex
+            : -1;
+        var textureByRegister = BuildLegacyTextureRegisterMap(expressionSet, materialSlot, srvMap, textureMap);
+
+        var context = new AnalysisContext
+        {
+            MaterialSlot = materialSlot,
+            VecBase = vecBase,
+            ScalarBase = scalarBase,
+            VecCount = vecCount,
+            ScalarCount = scalarCount,
+            TextureByRegister = textureByRegister
+        };
+
+        var cbNames = new Dictionary<int, string>();
+        foreach (var (name, parameter) in shader.UniformBufferParameters ?? [])
+            if (parameter.bIsBound)
+                cbNames.TryAdd(parameter.BaseIndex, name);
+
+        var dummyWiring = new PixelShaderWiring();
+        BuildPinExpressions(instructions, context, outputRegToTarget, false, cbNames, inputSemantics,
+            resourceDimensions, dummyWiring, results, outputSemantics);
+        return results;
+    }
+
+    /// <summary>
+    /// Isolates the WorldPositionOffset sub-expression from a vertex shader's decoded SV_Position
+    /// tree. UE's material template computes TranslatedWorldPosition once - the vertex-factory
+    /// base position plus WorldPositionOffset added exactly one time (MaterialTemplate.usf /
+    /// BasePassVertexShader.usf) - then feeds that single value into View.TranslatedWorldToClip
+    /// (three or four dot products against the very same position value). So inside the
+    /// SV_Position expression tree, that TranslatedWorldPosition node is referenced more times
+    /// than any other non-root node (once per clip-space component it contributes to). Finding
+    /// that node and peeling its own "add" back to its two operands - whichever operand touches a
+    /// material value (a uniform expression read or a texture sample; the base-position operand
+    /// can only ever be built from vertex/primitive/view data, never those) - recovers
+    /// WorldPositionOffset specifically, not the whole position formula. Returns null when the
+    /// shape doesn't match (no WPO used, or this shader's codegen combines things differently).
+    /// </summary>
+    private static PixelExpressionNode TryExtractWorldPositionOffset(PixelExpressionNode svPosition)
+    {
+        var refCounts = new Dictionary<PixelExpressionNode, int>(ReferenceEqualityComparer.Instance);
+        var counted = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        void Count(PixelExpressionNode node)
+        {
+            refCounts.TryGetValue(node, out var c);
+            refCounts[node] = c + 1;
+            if (!counted.Add(node)) return;
+            foreach (var arg in node.Args) Count(arg.Node);
+        }
+        Count(svPosition);
+
+        PixelExpressionNode candidate = null;
+        var bestCount = 1;
+        var scanned = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        void Scan(PixelExpressionNode node)
+        {
+            if (!scanned.Add(node)) return;
+            if (!ReferenceEquals(node, svPosition) && node.Op == "add" && node.Args.Count == 2 &&
+                refCounts.TryGetValue(node, out var c) && c > bestCount)
+            {
+                bestCount = c;
+                candidate = node;
+            }
+            foreach (var arg in node.Args) Scan(arg.Node);
+        }
+        Scan(svPosition);
+        if (candidate == null) return null;
+
+        bool TouchesMaterial(PixelExpressionNode node)
+        {
+            var walked = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+            bool Walk(PixelExpressionNode n)
+            {
+                if (!walked.Add(n)) return false;
+                if (n.Op == "cbrow" && n.Source is { Kind: PixelValueKind.VectorExpression or PixelValueKind.ScalarExpression }) return true;
+                // only a CONFIRMED material texture read counts - a "sample"/buffer-load node with
+                // no resolved Source is an engine resource (bone matrices, vertex-fetch buffers, ...),
+                // not a material expression, and must not be mistaken for one (a skinned mesh's
+                // bone-matrix vertex transform is exactly this shape and has no material WPO at all)
+                if (n.Op == "sample" && n.Source is { Kind: PixelValueKind.Texture }) return true;
+                return n.Args.Any(a => Walk(a.Node));
+            }
+            return Walk(node);
+        }
+
+        var a = candidate.Args[0].Node;
+        var b = candidate.Args[1].Node;
+        var aTouches = TouchesMaterial(a);
+        var bTouches = TouchesMaterial(b);
+        if (aTouches == bTouches) return null; // ambiguous - both or neither touch material data
+        return aTouches ? a : b;
+    }
+
+    /// <summary>
+    /// Finds this material's base-pass vertex shader (same quality/feature-level shader map,
+    /// same permutation family as the analyzed pixel shader where possible) and recovers its
+    /// WorldPositionOffset expression, or null if none is found/recoverable.
+    /// </summary>
+    public static PixelExpressionNode FindWorldPositionOffset(FMaterialShaderMapLegacy shaderMap,
+        FUniformExpressionSetLegacy expressionSet, Func<CUE4Parse.UE4.Objects.Core.Misc.FSHAHash, byte[]> sharedCodeResolver = null)
+    {
+        var candidates = new List<FShaderLegacy>();
+        void Visit(FShaderLegacy[] shaders)
+        {
+            foreach (var s in shaders ?? [])
+                if (s?.TypeName.StartsWith("TBasePassVS", StringComparison.Ordinal) == true)
+                    candidates.Add(s);
+        }
+        Visit(shaderMap.Shaders);
+        foreach (var meshMap in shaderMap.MeshShaderMaps ?? [])
+            Visit(meshMap.Shaders);
+
+        candidates = candidates
+            .OrderBy(c => c.TypeName.IndexOf("AtmosphericFog", StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0)
+            .ThenBy(c => c.TypeName.Contains("FNoLightMapPolicy") ? 0 : 1)
+            .ToList();
+
+        foreach (var shader in candidates)
+        {
+            if (shader.Resource == null) continue;
+            var blob = shader.Resource.Code is { Length: > 0 } inline ? inline : sharedCodeResolver?.Invoke(shader.Resource.OutputHash);
+            if (blob == null || blob.Length == 0) continue;
+            try
+            {
+                var outputs = AnalyzeVertexShaderLegacy(shader, blob, expressionSet);
+                if (!outputs.TryGetValue("SV_POSITION", out var svPosition)) continue;
+                var wpo = TryExtractWorldPositionOffset(svPosition);
+                if (wpo != null) return wpo;
+            }
+            catch
+            {
+                // try the next candidate
+            }
+        }
+        return null;
     }
 
     /// <summary>

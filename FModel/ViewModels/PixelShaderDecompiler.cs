@@ -127,11 +127,29 @@ public static class PixelShaderDecompiler
         // every node reached more than once across the whole shader is hoisted into a named
         // declaration up front, in dependency order, and every other reference to it becomes just
         // that name - this is a straightforward CSE pass over the DAG, not a rewrite of it.
+        // WorldPositionOffset lives entirely in the base-pass VERTEX shader (a completely separate
+        // compiled program from the pixel shader analyzed above) and is never wired into any pixel
+        // shader output pin, so it's recovered separately and folded into the same print pass as an
+        // extra root - best-effort: a missing/unrecoverable WPO silently omits the line rather than
+        // failing the whole decompile.
+        PixelExpressionNode? worldPositionOffset = null;
+        try
+        {
+            worldPositionOffset = MaterialPixelShaderAnalyzer.FindWorldPositionOffset(
+                shaderMap, expressionSet, CreateLegacyShaderCodeResolver(BuildInstanceChain(material)));
+        }
+        catch
+        {
+            // auxiliary - never fail the pixel-shader decompile over this
+        }
+
         var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel, shaderMap.ParsedProfile);
         var recursed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
                 CountRefs(root, ctx, recursed);
+        if (worldPositionOffset != null)
+            CountRefs(worldPositionOffset, ctx, recursed);
 
         if (wiring.PinExpressions.TryGetValue("Normal", out var normalRoot) && TryGetGBufferNormalEncodeInput(normalRoot, out var normalInput))
             ctx.PixelNormalWsNode = normalInput;
@@ -141,6 +159,8 @@ public static class PixelShaderDecompiler
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
                 AssignNames(root, ctx, named);
+        if (worldPositionOffset != null)
+            AssignNames(worldPositionOffset, ctx, named);
 
         if (ctx.Declarations.Count > 0)
         {
@@ -149,6 +169,9 @@ public static class PixelShaderDecompiler
                 sb.AppendLine(decl);
             sb.AppendLine();
         }
+
+        if (worldPositionOffset != null)
+            sb.Append("WorldPositionOffset = ").Append(Ref(worldPositionOffset, ctx)).Append(';').AppendLine();
 
         foreach (var pin in orderedPins)
         {

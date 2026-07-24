@@ -154,6 +154,15 @@ public static class FFrameworkObjectVersion
             < EGame.GAME_UE4_17 => Type.HardSoundReferences,
             < EGame.GAME_UE4_18 => Type.LocalVariablesBlueprintVisible,
             < EGame.GAME_UE4_19 => Type.UserDefinedStructsBlueprintVisible,
+            // Fortnite 1.10 (GAME_UE4_19 exactly) doesn't record this custom version in its packages
+            // (CustomVersionContainer comes back empty), so this fallback is what's actually used.
+            // Confirmed via real bytes that PinsStoreFName is NOT yet active here: FExpressionInput's
+            // InputName still serializes as the older FString, not FName - assuming otherwise
+            // over-reads by 4 bytes and corrupts every later FExpressionInput/FEdGraphPin read in the
+            // file. Left below UserDefinedStructsBlueprintVisible (30) deliberately; Paragon/Ashen
+            // (also tagged in the < GAME_UE4_20 bucket below) haven't been checked and keep the old
+            // assumption.
+            EGame.GAME_UE4_19 => Type.UserDefinedStructsBlueprintVisible,
             < EGame.GAME_UE4_20 => Type.FunctionTerminatorNodesUseMemberReference,
             < EGame.GAME_UE4_22 => Type.EditableEventsUseConstRefParameters,
             < EGame.GAME_UE4_24 => Type.BlueprintGeneratedClassIsAlwaysAuthoritative,

@@ -1281,6 +1281,23 @@ public class FShaderLegacy
         return BasePassPixelPolicyParamCounts.TryGetValue(policy, out var count) ? count : null;
     }
 
+    /// <summary>
+    /// Returns the policy parameter count for a parseable base pass VERTEX shader at UE4_19. Only the
+    /// UE4_19 path is modeled (the 4.23-era vertex-side shape hasn't come up yet in this session's
+    /// assets). TBasePassVertexShaderPolicyParamType&lt;VertexParametersType&gt; is templated on the same
+    /// LightMapPolicyType::VertexParametersType (BasePassRendering.h:322-323); for FUniformLightMapPolicy
+    /// (every LMP_* enum value covered by BasePassPixelPolicyParamCountsUE4_19)
+    /// VertexParametersType == PixelParametersType == FUniformLightMapPolicyShaderParametersType
+    /// (LightMapRendering.h:816-817), so the exact same param counts apply on the vertex side.
+    /// </summary>
+    private static int? GetBasePassVertexPolicyParamCount(string typeName, bool ue4_19 = false)
+    {
+        if (!ue4_19 || !typeName.StartsWith("TBasePassVS", StringComparison.Ordinal)) return null;
+        var policy = typeName["TBasePassVS".Length..];
+        if (policy.EndsWith("AtmosphericFog", StringComparison.Ordinal)) policy = policy[..^"AtmosphericFog".Length];
+        return BasePassPixelPolicyParamCountsUE4_19.TryGetValue(policy, out var count19) ? count19 : null;
+    }
+
     /// <summary>Reads one shader from TShaderMap::SerializeInline (type name + end-offset framed blob).</summary>
     public static FShaderLegacy? Read(FMaterialResourceProxyReader Ar)
     {
@@ -1321,12 +1338,34 @@ public class FShaderLegacy
                 return knownShader;
             }
 
-            // Not a TBasePassPS* (FMeshMaterialShader-based) type. Most other material shaders
-            // (e.g. TTranslucentLightingInjectPS) extend FMaterialShader directly with no per-type
-            // Serialize override, so their front matter is fully described by FMaterialShader::
-            // Serialize (ShaderBaseClasses.cpp:447) - try that directly first (see
-            // DeserializeMaterialShaderFront_UE4_19), and only fall back to the anchor-scan recovery
-            // if that doesn't validate (e.g. a genuinely different/mesh-based unknown type).
+            var vertexPolicyParamCount19 = GetBasePassVertexPolicyParamCount(typeName, ue4_19: true);
+            var vsFrontStart = Ar.Position;
+            if (vertexPolicyParamCount19 != null)
+            {
+                try
+                {
+                    var knownVertexShader = new FShaderLegacy { TypeName = typeName };
+                    knownVertexShader.DeserializeTBasePassVS_UE4_19(Ar, vertexPolicyParamCount19.Value);
+                    return knownVertexShader;
+                }
+                catch (Exception exVs)
+                {
+                    Log.Verbose("LegacyShaderMap: TBasePassVS front-matter parse failed for '{0}': {1}", typeName, exVs.Message);
+                    Ar.Position = vsFrontStart;
+                }
+            }
+
+            // Not a TBasePassPS*/TBasePassVS* type, but not necessarily "plain FMaterialShader" either - most
+            // other non-base-pass material shaders (TTranslucencyShadowDepthVS/PS, TLightMapDensityVS/PS,
+            // FVelocityVS/PS, FHitProxyVS/PS, TDepthOnlyVS, FDebugViewModeVS, FConvertToUniformMeshVS/GS,
+            // ...) still render actual mesh geometry, so they're FMeshMaterialShader-derived (need a
+            // FVertexFactoryParameterRef, MeshMaterialShader.h:77-78) rather than extending FMaterialShader
+            // directly - only truly "global" material shaders (e.g. TTranslucentLightingInjectPS) have no
+            // per-type Serialize override at all. Try the cheaper plain-FMaterialShader shape first (see
+            // DeserializeMaterialShaderFront_UE4_19), then the FMeshMaterialShader-extended shape (see
+            // DeserializeMeshMaterialShaderFront_UE4_19), and only fall back to the anchor-scan recovery
+            // if neither validates (e.g. a genuinely different/compute-based unknown type).
+            var frontStart = Ar.Position;
             try
             {
                 var plainShader = new FShaderLegacy { TypeName = typeName };
@@ -1338,6 +1377,18 @@ public class FShaderLegacy
             catch (Exception exPlain)
             {
                 Log.Verbose("LegacyShaderMap: plain FMaterialShader front-matter parse failed for '{0}': {1}", typeName, exPlain.Message);
+            }
+
+            Ar.Position = frontStart;
+            try
+            {
+                var meshShader = new FShaderLegacy { TypeName = typeName };
+                meshShader.DeserializeMeshMaterialShaderFront_UE4_19(Ar, typeName);
+                return meshShader;
+            }
+            catch (Exception exMesh)
+            {
+                Log.Verbose("LegacyShaderMap: mesh FMeshMaterialShader front-matter parse failed for '{0}': {1}", typeName, exMesh.Message);
             }
 
             Ar.Position = typeNamePosition;
@@ -1630,6 +1681,122 @@ public class FShaderLegacy
     }
 
     /// <summary>
+    /// Any non-TBasePassPS FMeshMaterialShader-derived shader at UE4_19 (TTranslucencyShadowDepthVS/PS,
+    /// TLightMapDensityVS/PS, FVelocityVS/PS, FHitProxyVS/PS, TDepthOnlyVS, FDebugViewModeVS,
+    /// FConvertToUniformMeshVS/GS, ...) - same FMeshMaterialShader::Serialize addition as TBasePassPS
+    /// (FVertexFactoryParameterRef + NonInstancedDitherLODFactorParameter, MeshMaterialShader.h:77-78),
+    /// reusing the exact same self-validating VF-parameter-shape/skip-offset candidates and
+    /// DeserializeBaseTail resync window as DeserializeTBasePassPS_UE4_19 - but WITHOUT
+    /// TBasePassPixelShaderPolicyParamType's own further additions (light-map-policy uniform buffers +
+    /// the four base-pass-only parameter structs), which belong to that one pixel-shader-specific
+    /// subclass, not to FMeshMaterialShader itself.
+    /// </summary>
+    private void DeserializeMeshMaterialShaderFront_UE4_19(FMaterialResourceProxyReader Ar, string expectedTypeName)
+    {
+        var diag = Log.IsEnabled(Serilog.Events.LogEventLevel.Verbose);
+        var p = DeserializeMaterialShaderFront_UE4_19(Ar);
+
+        if (diag) Log.Verbose("MeshMatFront: VertexFactoryTypeName at {0}", Ar.Position);
+        p.VertexFactoryTypeName = Ar.ReadFName().Text;
+        Ar.Position += 1; // uint8 ShaderFrequencyByte
+        Ar.Position += 20; // FSHAHash VFHash
+        var vfSkipOffset = Ar.Read<int>();
+        var afterVfSkipOffset = Ar.Position;
+        if (diag) Log.Verbose("MeshMatFront: vfSkipOffset={0} at {1}, VertexFactoryTypeName='{2}'", vfSkipOffset, afterVfSkipOffset, p.VertexFactoryTypeName);
+
+        // Same known-VF-type-first strategy as DeserializeTBasePassPS_UE4_19 (see its own comment for
+        // why): a resolved VF type reads its own FVertexFactoryShaderParameters subclass in place and
+        // never follows the stored skip offset at all.
+        var candidates = new List<Action>();
+        if (p.VertexFactoryTypeName == "FLocalVertexFactory")
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = Ar.ReadBoolean(); // bAnySpeedTreeParamIsBound
+                _ = new FShaderParameterLegacy(Ar); // LODParameter
+                _ = new FShaderParameterLegacy(Ar); // VertexFetch_VertexFetchParameters
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_PositionBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_TexCoordBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_PackedTangentsBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_ColorComponentsBufferParameter
+            });
+        }
+        else if (p.VertexFactoryTypeName.StartsWith("TGPUSkinVertexFactory", StringComparison.Ordinal)
+                 || p.VertexFactoryTypeName.StartsWith("TGPUSkinMorphVertexFactory", StringComparison.Ordinal))
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = new FShaderParameterLegacy(Ar); // PerBoneMotionBlur
+                _ = new FShaderResourceParameterLegacy(Ar); // BoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousBoneMatrices
+            });
+        }
+        else if (p.VertexFactoryTypeName.StartsWith("TGPUSkinAPEXClothVertexFactory", StringComparison.Ordinal))
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = new FShaderParameterLegacy(Ar); // PerBoneMotionBlur
+                _ = new FShaderResourceParameterLegacy(Ar); // BoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousBoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // ClothSimulVertsPositionsNormalsParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousClothSimulVertsPositionsNormalsParameter
+                _ = new FShaderParameterLegacy(Ar); // ClothLocalToWorldParameter
+                _ = new FShaderParameterLegacy(Ar); // ClothBlendWeightParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // GPUSkinApexClothParameter
+                _ = new FShaderParameterLegacy(Ar); // GPUSkinApexClothStartIndexOffsetParameter
+            });
+        }
+        candidates.Add(() => Ar.Position = vfSkipOffset);
+        candidates.Add(() => Ar.Position = Ar.OffsetToFirstResource + vfSkipOffset);
+
+        Exception? lastError = null;
+        foreach (var seekToVertexFactoryParametersEnd in candidates)
+        {
+            Ar.Position = afterVfSkipOffset;
+            try
+            {
+                seekToVertexFactoryParametersEnd();
+                if (diag) Log.Verbose("MeshMatFront: NonInstancedDitherLODFactorParameter at {0}", Ar.Position);
+                _ = new FShaderParameterLegacy(Ar); // NonInstancedDitherLODFactorParameter
+                MaterialParameters = p;
+
+                var tailStart = Ar.Position;
+                Exception? tailError = null;
+                var resynced = false;
+                for (var delta = 0; !resynced && Math.Abs(delta) <= 64; delta = delta > 0 ? -delta : -delta + 1)
+                {
+                    Ar.Position = tailStart + delta;
+                    try
+                    {
+                        DeserializeBaseTail(Ar);
+                        if (Target.Frequency >= 10)
+                            throw new InvalidOperationException($"implausible Target.Frequency {Target.Frequency}");
+                        if (!string.Equals(TypeName, expectedTypeName, StringComparison.Ordinal))
+                            throw new InvalidOperationException($"TypeName mismatch: expected '{expectedTypeName}', got '{TypeName}'");
+                        resynced = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        tailError = ex;
+                    }
+                }
+                if (!resynced) throw tailError ?? new InvalidOperationException("DeserializeBaseTail resync exhausted");
+                if (diag) Log.Verbose("MeshMatFront: validated, VF='{0}'", p.VertexFactoryTypeName);
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (diag) Log.Verbose("MeshMatFront: candidate failed: {0}", ex.Message);
+            }
+        }
+        throw lastError ?? new InvalidOperationException("DeserializeMeshMaterialShaderFront_UE4_19 exhausted VF candidates");
+    }
+
+    /// <summary>
     /// TBasePassPS* at UE4_19: FMeshMaterialShader::Serialize adds VertexFactoryParameters (a
     /// FVertexFactoryParameterRef whose "skip to the VF-type-specific parameter blob" offset is a
     /// 4-byte ABSOLUTE file position at this engine version - written via Ar.Tell()/Ar.Seek(),
@@ -1784,6 +1951,137 @@ public class FShaderLegacy
         }
 
         throw lastError ?? new InvalidOperationException("TBasePassPS: no vertex-factory-parameters interpretation validated");
+    }
+
+    /// <summary>
+    /// TBasePassVS* at UE4_19: the vertex-shader counterpart to DeserializeTBasePassPS_UE4_19, sharing
+    /// the same FMeshMaterialShader front matter (VF-ref + NonInstancedDitherLODFactorParameter) but
+    /// with TBasePassVertexShaderPolicyParamType::Serialize's own trailing fields instead of the pixel
+    /// shader's (BasePassRendering.h:355-367): VertexParametersType::Serialize (same
+    /// FUniformLightMapPolicyShaderParametersType as the pixel side for FUniformLightMapPolicy, hence
+    /// reusing policyParamCount) + HeightFogParameters (70B, shared with the PS side) +
+    /// TranslucentLightingVolumeParameters (8 x FShaderResourceParameter = 32B, BasePassRendering.h:292-314)
+    /// + ForwardLightingParameters (78B, shared with the PS side) + four FShaderParameter fields
+    /// (PreviousLocalToWorld/SkipOutputVelocity/InstancedEyeIndex/IsInstancedStereo, 6B each = 24B).
+    /// </summary>
+    private void DeserializeTBasePassVS_UE4_19(FMaterialResourceProxyReader Ar, int policyParamCount)
+    {
+        var diag = Log.IsEnabled(Serilog.Events.LogEventLevel.Verbose);
+        var p = DeserializeMaterialShaderFront_UE4_19(Ar);
+
+        if (diag) Log.Verbose("TBasePassVS: VertexFactoryTypeName at {0}", Ar.Position);
+        p.VertexFactoryTypeName = Ar.ReadFName().Text;
+        Ar.Position += 1; // uint8 ShaderFrequencyByte
+        Ar.Position += 20; // FSHAHash VFHash
+        var vfSkipOffset = Ar.Read<int>();
+        var afterVfSkipOffset = Ar.Position;
+        var expectedTypeName = TypeName;
+
+        var candidates = new List<Action>();
+        if (p.VertexFactoryTypeName == "FLocalVertexFactory")
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = Ar.ReadBoolean(); // bAnySpeedTreeParamIsBound
+                _ = new FShaderParameterLegacy(Ar); // LODParameter
+                _ = new FShaderParameterLegacy(Ar); // VertexFetch_VertexFetchParameters
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_PositionBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_TexCoordBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_PackedTangentsBufferParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // VertexFetch_ColorComponentsBufferParameter
+            });
+        }
+        else if (p.VertexFactoryTypeName.StartsWith("TGPUSkinVertexFactory", StringComparison.Ordinal)
+                 || p.VertexFactoryTypeName.StartsWith("TGPUSkinMorphVertexFactory", StringComparison.Ordinal))
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = new FShaderParameterLegacy(Ar); // PerBoneMotionBlur
+                _ = new FShaderResourceParameterLegacy(Ar); // BoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousBoneMatrices
+            });
+        }
+        else if (p.VertexFactoryTypeName.StartsWith("TGPUSkinAPEXClothVertexFactory", StringComparison.Ordinal))
+        {
+            candidates.Add(() =>
+            {
+                Ar.Position = afterVfSkipOffset;
+                _ = new FShaderParameterLegacy(Ar); // PerBoneMotionBlur
+                _ = new FShaderResourceParameterLegacy(Ar); // BoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousBoneMatrices
+                _ = new FShaderResourceParameterLegacy(Ar); // ClothSimulVertsPositionsNormalsParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // PreviousClothSimulVertsPositionsNormalsParameter
+                _ = new FShaderParameterLegacy(Ar); // ClothLocalToWorldParameter
+                _ = new FShaderParameterLegacy(Ar); // ClothBlendWeightParameter
+                _ = new FShaderResourceParameterLegacy(Ar); // GPUSkinApexClothParameter
+                _ = new FShaderParameterLegacy(Ar); // GPUSkinApexClothStartIndexOffsetParameter
+            });
+        }
+        candidates.Add(() => Ar.Position = vfSkipOffset);
+        candidates.Add(() => Ar.Position = Ar.OffsetToFirstResource + vfSkipOffset);
+
+        Exception? lastError = null;
+        foreach (var seekToVertexFactoryParametersEnd in candidates)
+        {
+            Ar.Position = afterVfSkipOffset;
+            try
+            {
+                seekToVertexFactoryParametersEnd();
+                if (diag) Log.Verbose("TBasePassVS: NonInstancedDitherLODFactorParameter at {0}", Ar.Position);
+                _ = new FShaderParameterLegacy(Ar); // NonInstancedDitherLODFactorParameter
+
+                if (diag) Log.Verbose("TBasePassVS: VertexParametersType ({0}) at {1}", policyParamCount, Ar.Position);
+                p.LightMapPolicyParameters = new FShaderUniformBufferParameterLegacy[policyParamCount];
+                for (var i = 0; i < policyParamCount; i++)
+                    p.LightMapPolicyParameters[i] = new FShaderUniformBufferParameterLegacy(Ar);
+
+                if (diag) Log.Verbose("TBasePassVS: HeightFog/TranslucentLightingVolume/ForwardLighting at {0}", Ar.Position);
+                Ar.Position += 70; // FHeightFogShaderParameters
+                Ar.Position += 32; // FTranslucentLightingVolumeParameters (8 x FShaderResourceParameter)
+                Ar.Position += 78; // FForwardLightingParameters
+                _ = new FShaderParameterLegacy(Ar); // PreviousLocalToWorldParameter
+                _ = new FShaderParameterLegacy(Ar); // SkipOutputVelocityParameter
+                _ = new FShaderParameterLegacy(Ar); // InstancedEyeIndexParameter
+                _ = new FShaderParameterLegacy(Ar); // IsInstancedStereoParameter
+                if (diag) Log.Verbose("TBasePassVS: done, DeserializeBaseTail at {0}", Ar.Position);
+                MaterialParameters = p;
+
+                var tailStart = Ar.Position;
+                Exception? tailError = null;
+                var resynced = false;
+                var usedDelta = 0;
+                for (var delta = 0; !resynced && Math.Abs(delta) <= 64; delta = delta > 0 ? -delta : -delta + 1)
+                {
+                    Ar.Position = tailStart + delta;
+                    try
+                    {
+                        DeserializeBaseTail(Ar);
+                        if (Target.Frequency >= 10)
+                            throw new InvalidOperationException($"implausible Target.Frequency {Target.Frequency}");
+                        if (!string.Equals(TypeName, expectedTypeName, StringComparison.Ordinal))
+                            throw new InvalidOperationException($"TypeName mismatch: expected '{expectedTypeName}', got '{TypeName}'");
+                        resynced = true;
+                        usedDelta = delta;
+                    }
+                    catch (Exception ex)
+                    {
+                        tailError = ex;
+                    }
+                }
+                if (!resynced) throw tailError ?? new InvalidOperationException("DeserializeBaseTail resync exhausted");
+                if (diag) Log.Verbose("TBasePassVS: validated at tail delta {0} (Target.Frequency={1})", usedDelta, Target.Frequency);
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (diag) Log.Verbose("TBasePassVS: candidate failed: {0}", ex.Message);
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("TBasePassVS: no vertex-factory-parameters interpretation validated");
     }
 
     /// <summary>

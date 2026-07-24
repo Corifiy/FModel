@@ -13,7 +13,7 @@ Log.Logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Console().
 
 const string paksPath = @"V:\.builds\1.10\FortniteGame\Content\Paks";
 const string aesKey = "0x79323938716A53623131354E71513341676164333044576E3251597254493843";
-const string assetPath = "FortniteGame/Content/Athena/Prototype/Terrain/M_Athena_Fortress_Skybox_LF_Spinning";
+const string assetPath = "FortniteGame/Content/UI/Foundation/Environment/Shell/Materials/M_UI_Shell_Sphere";
 
 Console.WriteLine($"Mounting {paksPath} ...");
 var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_19), StringComparer.OrdinalIgnoreCase)
