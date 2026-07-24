@@ -9,11 +9,11 @@ using CUE4Parse.Encryption.Aes;
 using FModel.ViewModels;
 using Serilog;
 
-Log.Logger = new LoggerConfiguration().MinimumLevel.Warning().WriteTo.Console().CreateLogger();
+Log.Logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Console().CreateLogger();
 
 const string paksPath = @"V:\.builds\1.10\FortniteGame\Content\Paks";
 const string aesKey = "0x79323938716A53623131354E71513341676164333044576E3251597254493843";
-const string assetPath = "FortniteGame/Content/Athena/Prototype/Terrain/M_Athena_Fortress_Skybox_LF_Spinning_2";
+const string assetPath = "FortniteGame/Content/Athena/Prototype/Terrain/M_Athena_Fortress_Skybox_LF_Spinning";
 
 Console.WriteLine($"Mounting {paksPath} ...");
 var provider = new DefaultFileProvider(paksPath, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_19), StringComparer.OrdinalIgnoreCase)
@@ -452,13 +452,30 @@ for (var i = 0; i < pkg.ExportMapLength; i++)
     }
 
     Console.WriteLine();
-    Console.WriteLine("----- Raw DXBC disassembly per pin -----");
-    if (PixelShaderDecompiler.AnalyzeForDiagnostics(material) is { } diag2 && diag2.Wiring.Success)
+    Console.WriteLine("----- FULL raw disassembly for TBasePassPSFNoLightMapPolicy, per resource -----");
+    foreach (var resource in material.LoadedMaterialResources)
     {
-        foreach (var (pin, asm) in diag2.Wiring.PinDisassembly)
+        if (resource.LoadedShaderMapLegacy is not { } smFull) continue;
+        var allShaders = smFull.Shaders.Concat(smFull.MeshShaderMaps.SelectMany(m => m.Shaders));
+        var target = allShaders.FirstOrDefault(s => s.TypeName == "TBasePassPSFNoLightMapPolicy" && s.Resource?.Code is { Length: > 0 });
+        if (target == null) continue;
+        Console.WriteLine($"=== Quality={smFull.ShaderMapId.QualityLevel} FeatureLevel={smFull.ShaderMapId.FeatureLevel} FULL DISASM ===");
+        Console.WriteLine(MaterialPixelShaderAnalyzer.DisassembleLegacyShader(target, target.Resource.Code, smFull.MaterialCompilationOutput.UniformExpressionSet));
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("----- Raw DXBC disassembly per pin, per resource -----");
+    foreach (var resource in material.LoadedMaterialResources)
+    {
+        if (resource.LoadedShaderMapLegacy is not { } sm2) continue;
+        Console.WriteLine($"=== Quality={sm2.ShaderMapId.QualityLevel} FeatureLevel={sm2.ShaderMapId.FeatureLevel} ===");
+        if (PixelShaderDecompiler.AnalyzeForDiagnostics(material, sm2) is { } diag2 && diag2.Wiring.Success)
         {
-            Console.WriteLine($"=== {pin} ===");
-            Console.WriteLine(asm);
+            foreach (var (pin, asm) in diag2.Wiring.PinDisassembly)
+            {
+                Console.WriteLine($"=== {pin} ===");
+                Console.WriteLine(asm);
+            }
         }
     }
 
