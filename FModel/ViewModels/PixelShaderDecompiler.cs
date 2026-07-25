@@ -133,10 +133,19 @@ public static class PixelShaderDecompiler
         // extra root - best-effort: a missing/unrecoverable WPO silently omits the line rather than
         // failing the whole decompile.
         PixelExpressionNode? worldPositionOffset = null;
+        var vertexInterpolants = new Dictionary<string, PixelExpressionNode>();
         try
         {
-            worldPositionOffset = MaterialPixelShaderAnalyzer.FindWorldPositionOffset(
-                shaderMap, expressionSet, CreateLegacyShaderCodeResolver(BuildInstanceChain(material)));
+            var sharedCodeResolver = CreateLegacyShaderCodeResolver(BuildInstanceChain(material));
+            worldPositionOffset = MaterialPixelShaderAnalyzer.FindWorldPositionOffset(shaderMap, expressionSet, sharedCodeResolver);
+            // Any other value the vertex shader computes and hands to this pixel shader as a plain
+            // interpolant (most commonly a Customized UV - e.g. a Fresnel-driven mask baked into a
+            // spare TEXCOORD slot at vertex time) never gets wired to a named material output pin
+            // the way Emissive/Normal/etc. do, so a pixel-shader-only decompile can only ever show
+            // it as an opaque "TEXCOORD1 (v3)" leaf - actionable as "read this input" but not as
+            // material nodes. Recovering it from the vertex shader's own bytecode the same way WPO
+            // is recovered turns that leaf into the real authored math.
+            vertexInterpolants = MaterialPixelShaderAnalyzer.FindVertexShaderComputedInterpolants(shaderMap, expressionSet, sharedCodeResolver);
         }
         catch
         {
@@ -150,6 +159,8 @@ public static class PixelShaderDecompiler
                 CountRefs(root, ctx, recursed);
         if (worldPositionOffset != null)
             CountRefs(worldPositionOffset, ctx, recursed);
+        foreach (var node in vertexInterpolants.Values)
+            CountRefs(node, ctx, recursed);
 
         if (wiring.PinExpressions.TryGetValue("Normal", out var normalRoot) && TryGetGBufferNormalEncodeInput(normalRoot, out var normalInput))
             ctx.PixelNormalWsNode = normalInput;
@@ -161,6 +172,8 @@ public static class PixelShaderDecompiler
                 AssignNames(root, ctx, named);
         if (worldPositionOffset != null)
             AssignNames(worldPositionOffset, ctx, named);
+        foreach (var node in vertexInterpolants.Values)
+            AssignNames(node, ctx, named);
 
         if (ctx.Declarations.Count > 0)
         {
@@ -172,6 +185,9 @@ public static class PixelShaderDecompiler
 
         if (worldPositionOffset != null)
             sb.Append("WorldPositionOffset = ").Append(Ref(worldPositionOffset, ctx)).Append(';').AppendLine();
+        foreach (var (semantic, node) in vertexInterpolants.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            sb.Append("// computed in the vertex shader, reaches the pixel shader as ").Append(semantic).AppendLine()
+                .Append("CustomizedUV_").Append(SanitizeIdentifier(semantic)).Append(" = ").Append(Ref(node, ctx)).Append(';').AppendLine();
 
         foreach (var pin in orderedPins)
         {
@@ -195,6 +211,15 @@ public static class PixelShaderDecompiler
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>Debug helper: resolves a shader's bytecode (inline or shared-library) for tooling/diagnostics.</summary>
+    public static byte[]? DebugResolveShaderCode(FShaderLegacy shader, UMaterialInterface material)
+    {
+        if (shader.Resource?.Code is { Length: > 0 } inline) return inline;
+        if (shader.Resource == null) return null;
+        var resolver = CreateLegacyShaderCodeResolver(BuildInstanceChain(material));
+        return resolver?.Invoke(shader.Resource.OutputHash);
     }
 
     private static List<UMaterialInterface> BuildInstanceChain(UMaterialInterface material)

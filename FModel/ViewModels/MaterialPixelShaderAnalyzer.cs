@@ -1306,10 +1306,86 @@ public static class MaterialPixelShaderAnalyzer
             if (parameter.bIsBound)
                 cbNames.TryAdd(parameter.BaseIndex, name);
 
+        AnnotateVertexFactoryAttributes(inputSemantics, shader.VertexFactoryTypeName);
+
         var dummyWiring = new PixelShaderWiring();
         BuildPinExpressions(instructions, context, outputRegToTarget, false, cbNames, inputSemantics,
             resourceDimensions, dummyWiring, results, outputSemantics);
         return results;
+    }
+
+    /// <summary>
+    /// FVertexFactoryInput's raw ATTRIBUTE# vertex-buffer semantics (read directly by the base-pass
+    /// vertex shader, before any material graph node runs) mean something completely different per
+    /// vertex factory - and unlike the VS→PS interpolants (which get sensible names like TEXCOORD10
+    /// for Tangent), these show up as a bare "ATTRIBUTE2 (v2)" with nothing to say it's what the
+    /// material editor's "Pre-Skinned Normal" node reads. Rewriting the semantic name here (before
+    /// BuildPinExpressions turns it into an "input" leaf's Detail string) makes that mapping visible
+    /// in the decompiled output directly instead of requiring a manual cross-check against the
+    /// vertex factory's own .ush source. Only the two vertex factories this session's assets have
+    /// actually used are covered; an unrecognized factory keeps the raw ATTRIBUTE# name unchanged.
+    /// </summary>
+    private static void AnnotateVertexFactoryAttributes(Dictionary<long, string> inputSemantics, string vertexFactoryTypeName)
+    {
+        if (inputSemantics == null || string.IsNullOrEmpty(vertexFactoryTypeName)) return;
+
+        // GpuSkinVertexFactory.ush FVertexFactoryInput (shared by TGPUSkinVertexFactory, its Morph
+        // and APEXCloth variants - all declare the same base layout for these registers).
+        var isGpuSkin = vertexFactoryTypeName.StartsWith("TGPUSkinVertexFactory", StringComparison.Ordinal)
+            || vertexFactoryTypeName.StartsWith("TGPUSkinMorphVertexFactory", StringComparison.Ordinal)
+            || vertexFactoryTypeName.StartsWith("TGPUSkinAPEXClothVertexFactory", StringComparison.Ordinal);
+        // LocalVertexFactory.ush FVertexFactoryInput (static meshes).
+        var isLocal = vertexFactoryTypeName == "FLocalVertexFactory";
+        if (!isGpuSkin && !isLocal) return;
+
+        Dictionary<string, string> names = isGpuSkin
+            ? new Dictionary<string, string>
+            {
+                ["ATTRIBUTE0"] = "PreSkinnedPosition",
+                ["ATTRIBUTE1"] = "PreSkinnedTangentX",
+                ["ATTRIBUTE2"] = "PreSkinnedNormal", // .xyz = TangentZ (the node's value); .w = tangent basis determinant sign
+                ["ATTRIBUTE3"] = "BoneIndices", // engine skinning data, not material-node-accessible
+                ["ATTRIBUTE4"] = "BoneWeights", // engine skinning data, not material-node-accessible
+                ["ATTRIBUTE9"] = "MorphDeltaPosition",
+                ["ATTRIBUTE10"] = "MorphDeltaNormal",
+                ["ATTRIBUTE13"] = "VertexColor",
+                ["ATTRIBUTE14"] = "BoneIndicesExtra",
+                ["ATTRIBUTE15"] = "BoneWeightsExtra",
+            }
+            : new Dictionary<string, string>
+            {
+                ["ATTRIBUTE0"] = "PreSkinnedPosition", // no skinning applied for a static mesh, but the same material node reads this
+                ["ATTRIBUTE1"] = "TangentX",
+                ["ATTRIBUTE2"] = "PreSkinnedNormal", // .xyz = TangentZ; .w = tangent basis determinant sign
+                ["ATTRIBUTE3"] = "VertexColor",
+                ["ATTRIBUTE4"] = "TexCoord0",
+                ["ATTRIBUTE8"] = "InstanceOrigin",
+                ["ATTRIBUTE13"] = "PrimitiveId",
+            };
+
+        foreach (var key in inputSemantics.Keys.ToList())
+        {
+            var raw = inputSemantics[key];
+            if (names.TryGetValue(raw, out var friendly))
+                inputSemantics[key] = $"{friendly} [{raw}]";
+        }
+    }
+
+    /// <summary>Debug helper: every v# register's raw ISGN semantic name/index for a legacy shader blob.</summary>
+    public static Dictionary<long, string> DebugGetInputSemanticsLegacy(byte[] blob)
+    {
+        var result = new Dictionary<long, string>();
+        if (blob == null || blob.Length == 0) return result;
+        var pos = 0;
+        ReadU32(blob, ref pos);
+        ReadResourceMap(blob, ref pos);
+        ReadResourceMap(blob, ref pos);
+        ReadResourceMap(blob, ref pos);
+        ReadResourceMap(blob, ref pos);
+        ReadResourceMap(blob, ref pos);
+        if (!HasDxbcMagic(blob, pos)) return result;
+        TryParseDxbcContainer(blob, pos, out _, out _, out var inputSemantics, out _, requireOutputSignature: false);
+        return inputSemantics;
     }
 
     /// <summary>
@@ -1382,12 +1458,17 @@ public static class MaterialPixelShaderAnalyzer
     }
 
     /// <summary>
-    /// Finds this material's base-pass vertex shader (same quality/feature-level shader map,
-    /// same permutation family as the analyzed pixel shader where possible) and recovers its
-    /// WorldPositionOffset expression, or null if none is found/recoverable.
+    /// Finds this material's base-pass vertex shader candidates (same quality/feature-level shader
+    /// map) and analyzes each one that has resolvable bytecode, keyed by output semantic
+    /// (SV_POSITION, TEXCOORD1, …) - the same "stage mode" of <see cref="BuildPinExpressions"/>
+    /// used for the shader-map overview. Returns every successfully-analyzed candidate (not just
+    /// the first) so callers can keep trying until their OWN extraction succeeds - a candidate can
+    /// analyze fine yet still not be the one a specific search (e.g. WorldPositionOffset) needs.
+    /// Shared by <see cref="FindWorldPositionOffset"/> and
+    /// <see cref="FindVertexShaderComputedInterpolants"/>.
     /// </summary>
-    public static PixelExpressionNode FindWorldPositionOffset(FMaterialShaderMapLegacy shaderMap,
-        FUniformExpressionSetLegacy expressionSet, Func<CUE4Parse.UE4.Objects.Core.Misc.FSHAHash, byte[]> sharedCodeResolver = null)
+    private static IEnumerable<Dictionary<string, PixelExpressionNode>> FindBasePassVertexShaderOutputs(FMaterialShaderMapLegacy shaderMap,
+        FUniformExpressionSetLegacy expressionSet, Func<CUE4Parse.UE4.Objects.Core.Misc.FSHAHash, byte[]> sharedCodeResolver)
     {
         var candidates = new List<FShaderLegacy>();
         void Visit(FShaderLegacy[] shaders)
@@ -1410,19 +1491,80 @@ public static class MaterialPixelShaderAnalyzer
             if (shader.Resource == null) continue;
             var blob = shader.Resource.Code is { Length: > 0 } inline ? inline : sharedCodeResolver?.Invoke(shader.Resource.OutputHash);
             if (blob == null || blob.Length == 0) continue;
+            Dictionary<string, PixelExpressionNode> outputs;
             try
             {
-                var outputs = AnalyzeVertexShaderLegacy(shader, blob, expressionSet);
-                if (!outputs.TryGetValue("SV_POSITION", out var svPosition)) continue;
-                var wpo = TryExtractWorldPositionOffset(svPosition);
-                if (wpo != null) return wpo;
+                outputs = AnalyzeVertexShaderLegacy(shader, blob, expressionSet);
             }
             catch
             {
-                // try the next candidate
+                continue;
             }
+            if (outputs.ContainsKey("SV_POSITION")) yield return outputs;
+        }
+    }
+
+    /// <summary>
+    /// Finds this material's base-pass vertex shader and recovers its WorldPositionOffset
+    /// expression, or null if none is found/recoverable.
+    /// </summary>
+    public static PixelExpressionNode FindWorldPositionOffset(FMaterialShaderMapLegacy shaderMap,
+        FUniformExpressionSetLegacy expressionSet, Func<CUE4Parse.UE4.Objects.Core.Misc.FSHAHash, byte[]> sharedCodeResolver = null)
+    {
+        foreach (var outputs in FindBasePassVertexShaderOutputs(shaderMap, expressionSet, sharedCodeResolver))
+        {
+            if (outputs.TryGetValue("SV_POSITION", out var svPosition) && TryExtractWorldPositionOffset(svPosition) is { } wpo)
+                return wpo;
         }
         return null;
+    }
+
+    /// <summary>
+    /// A node is a "trivial passthrough" - a raw vertex/mesh attribute riding through to the pixel
+    /// shader completely unmodified (an authored UV channel, vertex color, tangent basis, ...) -
+    /// when its whole expression tree is built only from "input" leaves (optionally recombined by
+    /// "append"/"mask", which don't compute anything) with no real arithmetic anywhere in it. A
+    /// Customized UV (or any other vertex-shader-computed value) always has at least one real op
+    /// (mul, mad, max, a texture sample, ...) in its tree, so this cleanly tells the two apart
+    /// without needing to know the material's authored UV channel count.
+    /// </summary>
+    private static bool IsTrivialPassthrough(PixelExpressionNode node)
+    {
+        var visited = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
+        bool Walk(PixelExpressionNode n)
+        {
+            if (!visited.Add(n)) return true;
+            return n.Op switch
+            {
+                "input" or "imm" => true,
+                "append" or "mask" => n.Args.All(a => Walk(a.Node)),
+                _ => false,
+            };
+        }
+        return Walk(node);
+    }
+
+    /// <summary>
+    /// Recovers every OTHER vertex-shader-computed value reaching the pixel shader (Customized
+    /// UVs and the like) - anything the base-pass vertex shader writes to an output register
+    /// besides SV_POSITION (see <see cref="FindWorldPositionOffset"/>) that isn't just a raw mesh
+    /// attribute passing through unmodified (see <see cref="IsTrivialPassthrough"/>). Keyed by the
+    /// DXBC output semantic name (TEXCOORD1, …) since that's the only identity this reader has for
+    /// it - the material's own name for the Customized UV slot isn't preserved in cooked data.
+    /// </summary>
+    public static Dictionary<string, PixelExpressionNode> FindVertexShaderComputedInterpolants(FMaterialShaderMapLegacy shaderMap,
+        FUniformExpressionSetLegacy expressionSet, Func<CUE4Parse.UE4.Objects.Core.Misc.FSHAHash, byte[]> sharedCodeResolver = null)
+    {
+        var result = new Dictionary<string, PixelExpressionNode>();
+        var outputs = FindBasePassVertexShaderOutputs(shaderMap, expressionSet, sharedCodeResolver).FirstOrDefault();
+        if (outputs == null) return result;
+        foreach (var (name, node) in outputs)
+        {
+            if (name == "SV_POSITION") continue;
+            if (IsTrivialPassthrough(node)) continue;
+            result[name] = node;
+        }
+        return result;
     }
 
     /// <summary>
