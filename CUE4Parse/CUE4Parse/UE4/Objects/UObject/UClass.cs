@@ -156,6 +156,13 @@ public class UClass : UStruct
             }
         }
 
+        var controlRigOperators = BlueprintDecompilerUtils.DecompileControlRigOperators(classDefaultObject);
+        if (controlRigOperators != null)
+        {
+            stringBuilder.AppendLine();
+            stringBuilder.AppendLine(controlRigOperators);
+        }
+
         var totalFuncMapCount = FuncMap.Count;
         if (totalFuncMapCount > 0) stringBuilder.AppendLine();
 

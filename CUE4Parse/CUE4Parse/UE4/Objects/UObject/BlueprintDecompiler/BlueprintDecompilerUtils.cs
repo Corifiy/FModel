@@ -8,6 +8,7 @@ using CUE4Parse.GameTypes.DFHO.Kismet;
 using CUE4Parse.GameTypes.WuWa.Kismet;
 using CUE4Parse.MappingsProvider;
 using CUE4Parse.MappingsProvider.Usmap;
+using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Kismet;
 using CUE4Parse.UE4.Objects.Core.i18N;
@@ -1783,5 +1784,123 @@ public static class BlueprintDecompilerUtils
             default:
                 throw new NotImplementedException($"KismetExpression '{expression.GetType().Name}' is currently not supported");
         }
+    }
+
+    // Legacy (pre-RigVM) ControlRig assets don't compile their graph to Kismet bytecode at all: FuncMap is empty.
+    // Instead the graph is baked into an "Operators" stream (TArray<FControlRigOperator>) on the CDO, a flat
+    // Copy/Exec instruction list operating over property paths into per-node RigUnit struct properties on the class.
+    // See Engine/Plugins/Experimental/ControlRig/Source/ControlRig/Public/ControlRigDefines.h (FControlRigOperator)
+    // and ControlRig.h (UControlRig::Execute / ControlRigVM::Execute).
+    public static string? DecompileControlRigOperators(IPropertyHolder? classDefaultObject)
+    {
+        if (classDefaultObject is null) return null;
+
+        var operators = classDefaultObject.GetOrDefault<FStructFallback[]>("Operators", []);
+        if (operators.Length == 0) return null;
+
+        // Node execution order, in first-seen order (dictionary preserves insertion order).
+        var nodeTypes = new Dictionary<string, string>();
+        var execOrder = new List<string>();
+        // Every Copy op's target tells us exactly which node.pin receives the wire, regardless of
+        // where in the stream the Copy happens to sit relative to that node's Exec.
+        var incomingLinksByNode = new Dictionary<string, List<(string From, string ToPin)>>();
+        var strayLinks = new List<(string From, string To)>();
+
+        foreach (var op in operators)
+        {
+            var opCode = op.GetOrDefault("OpCode", new FName("EControlRigOpCode::Invalid")).Text.SubstringAfter("::");
+            var path1 = op.GetOrDefault("PropertyPath1", string.Empty);
+            var path2 = op.GetOrDefault("PropertyPath2", string.Empty);
+
+            switch (opCode)
+            {
+                case "Copy":
+                {
+                    var targetNode = path2.SubstringBefore('.');
+                    var targetPin = path2.Contains('.') ? path2.SubstringAfter('.') : null;
+
+                    if (targetPin is null || string.IsNullOrEmpty(targetNode))
+                    {
+                        strayLinks.Add((path1, path2));
+                        break;
+                    }
+
+                    if (!incomingLinksByNode.TryGetValue(targetNode, out var list))
+                        incomingLinksByNode[targetNode] = list = [];
+                    list.Add((path1, targetPin));
+                    break;
+                }
+                case "Exec":
+                {
+                    var nodeName = path1;
+                    if (!nodeTypes.ContainsKey(nodeName))
+                    {
+                        var rigUnitStructName = classDefaultObject
+                            .GetOrDefault<FStructFallback?>(nodeName, null)
+                            ?.GetOrDefault("RigUnitStructName", new FName()).Text;
+
+                        nodeTypes[nodeName] = string.IsNullOrEmpty(rigUnitStructName) || rigUnitStructName == "None"
+                            ? "?"
+                            : rigUnitStructName;
+                    }
+                    execOrder.Add(nodeName);
+                    break;
+                }
+                case "Done":
+                    break;
+                default:
+                    strayLinks.Add(($"<unhandled opcode '{opCode}'> {path1}", path2));
+                    break;
+            }
+        }
+
+        var stringBuilder = new CustomStringBuilder();
+        stringBuilder.AppendLine("// Decompiled ControlRig graph (legacy operator stream, pre-RigVM).");
+        stringBuilder.AppendLine("// Place each node below in order, then wire its listed input pins; the last section");
+        stringBuilder.AppendLine("// is the exec ('then') chain connecting the nodes left to right.");
+        stringBuilder.AppendLine();
+
+        var visitedNodes = new HashSet<string>();
+        foreach (var nodeName in execOrder)
+        {
+            if (!visitedNodes.Add(nodeName)) continue;
+
+            stringBuilder.AppendLine($"[{nodeName}] ({nodeTypes[nodeName]})");
+            stringBuilder.IncreaseIndentation();
+            if (incomingLinksByNode.TryGetValue(nodeName, out var links))
+            {
+                foreach (var (from, toPin) in links)
+                    stringBuilder.AppendLine($"{from} -> {toPin}");
+            }
+            stringBuilder.DecreaseIndentation();
+            stringBuilder.AppendLine();
+        }
+
+        // Links whose target node is never Exec'd on its own (pure data pass-through) or couldn't be
+        // resolved to a node.pin pair.
+        foreach (var (nodeName, links) in incomingLinksByNode)
+        {
+            if (visitedNodes.Contains(nodeName)) continue;
+
+            stringBuilder.AppendLine($"[{nodeName}] (not directly executed)");
+            stringBuilder.IncreaseIndentation();
+            foreach (var (from, toPin) in links)
+                stringBuilder.AppendLine($"{from} -> {toPin}");
+            stringBuilder.DecreaseIndentation();
+            stringBuilder.AppendLine();
+        }
+
+        if (strayLinks.Count > 0)
+        {
+            stringBuilder.AppendLine("// Unresolved links:");
+            foreach (var (from, to) in strayLinks)
+                stringBuilder.AppendLine($"{from} -> {to}");
+            stringBuilder.AppendLine();
+        }
+
+        stringBuilder.AppendLine("// Exec ('then') chain:");
+        stringBuilder.AppendLine(string.Join(" -> ", execOrder));
+
+        return stringBuilder.ToString();
     }
 }
