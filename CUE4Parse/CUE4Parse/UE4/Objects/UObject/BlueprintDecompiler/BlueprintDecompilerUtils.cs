@@ -18,6 +18,7 @@ using CUE4Parse.UE4.Objects.Engine.Ai;
 using CUE4Parse.UE4.Objects.Engine.Curves;
 using CUE4Parse.UE4.Objects.Engine.GameFramework;
 using CUE4Parse.UE4.Objects.GameplayTags;
+using CUE4Parse.UE4.Objects.RigVM;
 using CUE4Parse.Utils;
 using Serilog;
 
@@ -1786,16 +1787,58 @@ public static class BlueprintDecompilerUtils
         }
     }
 
+    // FControlRigOperator::PropertyPath1/2 changed type at FControlRigObjectVersion.OperatorsStoringPropertyPaths
+    // (UE 4.23/4.24): plain FString -> FCachedPropertyPath, a reflected USTRUCT (PropertyPathHelpers.h) with no
+    // custom Serialize() override, storing TArray<FPropertyPathSegment> Segments { FName Name; int32 ArrayIndex }.
+    // Handles both eras: try the old string field first, then reconstruct from Segments if it's the newer struct.
+    private static string GetOperatorPropertyPath(IPropertyHolder op, string legacyFieldName, string cachedFieldName)
+    {
+        var asString = op.GetOrDefault(legacyFieldName, string.Empty);
+        if (!string.IsNullOrEmpty(asString)) return asString;
+
+        var segments = op.GetOrDefault<FStructFallback?>(cachedFieldName, null)?.GetOrDefault<FStructFallback[]>("Segments", []);
+        if (segments is null || segments.Length == 0) return string.Empty;
+
+        var parts = new List<string>(segments.Length);
+        foreach (var segment in segments)
+        {
+            var name = segment.GetOrDefault<FName>("Name", new FName()).Text;
+            if (string.IsNullOrEmpty(name) || name == "None") continue;
+
+            var arrayIndex = segment.GetOrDefault("ArrayIndex", -1);
+            parts.Add(arrayIndex >= 0 ? $"{name}[{arrayIndex}]" : name);
+        }
+        return string.Join(".", parts);
+    }
+
+    // The Operators stream moved between eras: on UE 4.19-4.22 it's a UPROPERTY on UControlRig, so the populated
+    // copy serializes on the CDO. From 4.23 the compiler writes it to the generated class object instead
+    // (UControlRigBlueprintGeneratedClass::Operators, see ControlRigBlueprintCompiler.cpp PostCompile), and the
+    // CDO may still carry a stale copy whose paths are all empty. Prefer whichever copy actually resolves.
+    private static FStructFallback[] SelectOperatorsSource(IPropertyHolder? owningClass, IPropertyHolder classDefaultObject)
+    {
+        var fromClass = owningClass?.GetOrDefault<FStructFallback[]>("Operators", []) ?? [];
+        foreach (var op in fromClass)
+        {
+            if (!string.IsNullOrEmpty(GetOperatorPropertyPath(op, "PropertyPath1", "CachedPropertyPath1")) ||
+                !string.IsNullOrEmpty(GetOperatorPropertyPath(op, "PropertyPath2", "CachedPropertyPath2")))
+                return fromClass;
+        }
+        return classDefaultObject.GetOrDefault<FStructFallback[]>("Operators", []);
+    }
+
     // Legacy (pre-RigVM) ControlRig assets don't compile their graph to Kismet bytecode at all: FuncMap is empty.
-    // Instead the graph is baked into an "Operators" stream (TArray<FControlRigOperator>) on the CDO, a flat
-    // Copy/Exec instruction list operating over property paths into per-node RigUnit struct properties on the class.
+    // Instead the graph is baked into an "Operators" stream (TArray<FControlRigOperator>), a flat Copy/Exec
+    // instruction list operating over property paths into per-node RigUnit struct properties on the class.
     // See Engine/Plugins/Experimental/ControlRig/Source/ControlRig/Public/ControlRigDefines.h (FControlRigOperator)
     // and ControlRig.h (UControlRig::Execute / ControlRigVM::Execute).
-    public static string? DecompileControlRigOperators(IPropertyHolder? classDefaultObject)
+    public static string? DecompileControlRigOperators(IPropertyHolder? owningClass, IPropertyHolder? classDefaultObject, out HashSet<string> nodePropertyNames, out List<string> declarationOrder)
     {
+        nodePropertyNames = [];
+        declarationOrder = [];
         if (classDefaultObject is null) return null;
 
-        var operators = classDefaultObject.GetOrDefault<FStructFallback[]>("Operators", []);
+        var operators = SelectOperatorsSource(owningClass, classDefaultObject);
         if (operators.Length == 0) return null;
 
         // Node execution order, in first-seen order (dictionary preserves insertion order).
@@ -1806,11 +1849,18 @@ public static class BlueprintDecompilerUtils
         var incomingLinksByNode = new Dictionary<string, List<(string From, string ToPin)>>();
         var strayLinks = new List<(string From, string To)>();
 
+        // Tracks whether ANY operator actually resolved to a usable path, as opposed to just having an empty
+        // dictionary - a stream of e.g. all-Exec operators with unresolved paths still populates nodeTypes
+        // (every one collapses onto the same "" key), so dictionary emptiness alone can't detect that failure.
+        var hasAnyResolvedPath = false;
+
         foreach (var op in operators)
         {
             var opCode = op.GetOrDefault("OpCode", new FName("EControlRigOpCode::Invalid")).Text.SubstringAfter("::");
-            var path1 = op.GetOrDefault("PropertyPath1", string.Empty);
-            var path2 = op.GetOrDefault("PropertyPath2", string.Empty);
+            var path1 = GetOperatorPropertyPath(op, "PropertyPath1", "CachedPropertyPath1");
+            var path2 = GetOperatorPropertyPath(op, "PropertyPath2", "CachedPropertyPath2");
+            if (!string.IsNullOrEmpty(path1) || !string.IsNullOrEmpty(path2))
+                hasAnyResolvedPath = true;
 
             switch (opCode)
             {
@@ -1833,11 +1883,25 @@ public static class BlueprintDecompilerUtils
                 case "Exec":
                 {
                     var nodeName = path1;
+                    if (string.IsNullOrEmpty(nodeName))
+                    {
+                        strayLinks.Add(("<unresolved Exec target>", path2));
+                        break;
+                    }
+
                     if (!nodeTypes.ContainsKey(nodeName))
                     {
                         var rigUnitStructName = classDefaultObject
                             .GetOrDefault<FStructFallback?>(nodeName, null)
                             ?.GetOrDefault("RigUnitStructName", new FName()).Text;
+
+                        if (string.IsNullOrEmpty(rigUnitStructName) || rigUnitStructName == "None")
+                        {
+                            // Some units never fill RigUnitStructName (e.g. RigUnit_BeginExecution on 4.23-era
+                            // rigs) - fall back to the struct type recorded on the node's own property tag.
+                            rigUnitStructName = classDefaultObject.Properties
+                                .FirstOrDefault(p => p.Name.Text == nodeName)?.TagData?.StructType;
+                        }
 
                         nodeTypes[nodeName] = string.IsNullOrEmpty(rigUnitStructName) || rigUnitStructName == "None"
                             ? "?"
@@ -1854,53 +1918,480 @@ public static class BlueprintDecompilerUtils
             }
         }
 
-        var stringBuilder = new CustomStringBuilder();
-        stringBuilder.AppendLine("// Decompiled ControlRig graph (legacy operator stream, pre-RigVM).");
-        stringBuilder.AppendLine("// Place each node below in order, then wire its listed input pins; the last section");
-        stringBuilder.AppendLine("// is the exec ('then') chain connecting the nodes left to right.");
-        stringBuilder.AppendLine();
-
-        var visitedNodes = new HashSet<string>();
-        foreach (var nodeName in execOrder)
+        // Safety net: if no operator resolved to a usable path (both the class copy and the CDO copy were
+        // empty), bail out cleanly rather than emit a graph made entirely of blank node names and unresolved
+        // links. The caller falls back to showing the class's raw properties, same as if there were no
+        // Operators stream at all.
+        if (operators.Length > 0 && !hasAnyResolvedPath)
         {
-            if (!visitedNodes.Add(nodeName)) continue;
-
-            stringBuilder.AppendLine($"[{nodeName}] ({nodeTypes[nodeName]})");
-            stringBuilder.IncreaseIndentation();
-            if (incomingLinksByNode.TryGetValue(nodeName, out var links))
-            {
-                foreach (var (from, toPin) in links)
-                    stringBuilder.AppendLine($"{from} -> {toPin}");
-            }
-            stringBuilder.DecreaseIndentation();
-            stringBuilder.AppendLine();
+            Log.Warning("ControlRig Operators stream had {Count} entries but none resolved to a node - no usable property paths in either the class or CDO copy", operators.Length);
+            return null;
         }
 
-        // Links whose target node is never Exec'd on its own (pure data pass-through) or couldn't be
-        // resolved to a node.pin pair.
-        foreach (var (nodeName, links) in incomingLinksByNode)
-        {
-            if (visitedNodes.Contains(nodeName)) continue;
+        nodePropertyNames = new HashSet<string>(nodeTypes.Keys);
+        foreach (var nodeName in incomingLinksByNode.Keys)
+            nodePropertyNames.Add(nodeName);
 
-            stringBuilder.AppendLine($"[{nodeName}] (not directly executed)");
-            stringBuilder.IncreaseIndentation();
-            foreach (var (from, toPin) in links)
-                stringBuilder.AppendLine($"{from} -> {toPin}");
-            stringBuilder.DecreaseIndentation();
-            stringBuilder.AppendLine();
+        // A handful of pins (almost always HierarchyRef <- the single rig-wide hierarchy variable) are wired
+        // identically on nearly every node. Hoist whichever source wins a strict majority for a given pin name
+        // into one shared line instead of repeating it on every node; only genuine per-node overrides stay inline.
+        var pinSourceCounts = new Dictionary<string, Dictionary<string, int>>();
+        foreach (var links in incomingLinksByNode.Values)
+        foreach (var (from, toPin) in links)
+        {
+            if (!pinSourceCounts.TryGetValue(toPin, out var sources))
+                pinSourceCounts[toPin] = sources = [];
+            sources[from] = sources.GetValueOrDefault(from) + 1;
+        }
+
+        var defaultSourceForPin = new Dictionary<string, string>();
+        foreach (var (toPin, sources) in pinSourceCounts)
+        {
+            var total = sources.Values.Sum();
+            var (bestFrom, bestCount) = sources.MaxBy(kv => kv.Value);
+            if (bestCount >= 2 && bestCount * 2 > total)
+                defaultSourceForPin[toPin] = bestFrom;
+        }
+
+        // Full render order: exec'd nodes first (in exec order), then any node that only ever receives a
+        // wire but is never Exec'd on its own (pure data pass-through, or couldn't be resolved to a pin).
+        var orderedNodeNames = new List<string>();
+        var seenNodes = new HashSet<string>();
+        foreach (var nodeName in execOrder)
+            if (seenNodes.Add(nodeName)) orderedNodeNames.Add(nodeName);
+        foreach (var nodeName in incomingLinksByNode.Keys)
+            if (seenNodes.Add(nodeName)) orderedNodeNames.Add(nodeName);
+
+        // Broader "first use" order for declaring member variables: an external source referenced by a
+        // node's wiring (e.g. the rig-wide hierarchy variable feeding every HierarchyRef pin) is declared
+        // right before the first node that actually reads it, rather than wherever it happened to serialize.
+        var declared = new HashSet<string>();
+        foreach (var nodeName in orderedNodeNames)
+        {
+            if (incomingLinksByNode.TryGetValue(nodeName, out var nodeLinks))
+            {
+                foreach (var (from, _) in nodeLinks)
+                {
+                    var root = from.SubstringBefore('.');
+                    if (!string.IsNullOrEmpty(root) && !nodePropertyNames.Contains(root) && declared.Add(root))
+                        declarationOrder.Add(root);
+                }
+            }
+            if (declared.Add(nodeName))
+                declarationOrder.Add(nodeName);
+        }
+
+        // Gather each node's unwired literal field values up front (needed for both per-node rendering and
+        // the per-type default hoisting below).
+        var literalFieldsByNode = new Dictionary<string, Dictionary<string, string>>();
+        foreach (var nodeName in orderedNodeNames)
+        {
+            var wiredPins = incomingLinksByNode.TryGetValue(nodeName, out var links) ? links.Select(l => l.ToPin).ToHashSet() : [];
+            var fields = new Dictionary<string, string>();
+            var nodeStruct = classDefaultObject.GetOrDefault<FStructFallback?>(nodeName, null);
+            if (nodeStruct != null)
+            {
+                foreach (var property in nodeStruct.Properties)
+                {
+                    var propName = property.Name.Text;
+                    if (propName is "RigUnitName" or "RigUnitStructName" or "ExecutionType") continue;
+                    if (wiredPins.Contains(propName)) continue;
+
+                    var formatted = FormatLiteralPinValue(property);
+                    if (formatted != null) fields[propName] = formatted;
+                }
+            }
+            literalFieldsByNode[nodeName] = fields;
+        }
+
+        // Many nodes of the same RigUnit type share identical config (e.g. every RigUnit_ApplyFK defaults to
+        // ApplyTransformMode=Override). Hoist whichever value wins a strict majority per (type, field) into a
+        // one-time header instead of repeating it on every node of that type.
+        var fieldValueCountsByType = new Dictionary<string, Dictionary<string, Dictionary<string, int>>>();
+        var instanceCountByType = new Dictionary<string, int>();
+        foreach (var nodeName in orderedNodeNames)
+        {
+            if (!nodeTypes.TryGetValue(nodeName, out var type)) continue;
+            instanceCountByType[type] = instanceCountByType.GetValueOrDefault(type) + 1;
+            if (!fieldValueCountsByType.TryGetValue(type, out var fieldCounts))
+                fieldValueCountsByType[type] = fieldCounts = [];
+            foreach (var (field, value) in literalFieldsByNode[nodeName])
+            {
+                if (!fieldCounts.TryGetValue(field, out var valueCounts))
+                    fieldCounts[field] = valueCounts = [];
+                valueCounts[value] = valueCounts.GetValueOrDefault(value) + 1;
+            }
+        }
+
+        var defaultFieldsByType = new Dictionary<string, Dictionary<string, string>>();
+        foreach (var (type, fieldCounts) in fieldValueCountsByType)
+        {
+            if (instanceCountByType[type] < 2) continue; // nothing to hoist for a one-off node type
+            foreach (var (field, valueCounts) in fieldCounts)
+            {
+                var total = valueCounts.Values.Sum();
+                var (bestValue, bestCount) = valueCounts.MaxBy(kv => kv.Value);
+                if (bestCount >= 2 && bestCount * 2 > total)
+                {
+                    if (!defaultFieldsByType.TryGetValue(type, out var defaults))
+                        defaultFieldsByType[type] = defaults = [];
+                    defaults[field] = bestValue;
+                }
+            }
+        }
+
+        // Rendered as real statements (assignment, member access, function calls) rather than arrow/bracket
+        // notation, so the C++ syntax highlighter tokenizes it correctly instead of mangling it; only the
+        // per-node/per-type annotations are "//" comments, same as any other decompiled code would use.
+        var stringBuilder = new CustomStringBuilder();
+        stringBuilder.AppendLine("// Decompiled ControlRig graph (legacy operator stream, pre-RigVM).");
+        stringBuilder.AppendLine("// This system has no pure/impure node split like modern RigVM: every RigUnit below, including");
+        stringBuilder.AppendLine("// plain getters like RigUnit_GetJointTransform, is explicitly exec'd - that's what .Execute() calls.");
+        foreach (var (type, defaults) in defaultFieldsByType)
+            stringBuilder.AppendLine($"// Defaults - {type}: {string.Join(", ", defaults.Select(kv => $"{kv.Key} = {kv.Value}"))}");
+        foreach (var (toPin, from) in defaultSourceForPin)
+            stringBuilder.AppendLine($"// Unless overridden below: *.{toPin} = {from};");
+        stringBuilder.AppendLine("void Execute()");
+        stringBuilder.OpenBlock();
+
+        var step = 1;
+        foreach (var nodeName in orderedNodeNames)
+        {
+            var hasExecIndex = nodeTypes.TryGetValue(nodeName, out var typeLabel);
+            typeLabel ??= "not directly executed";
+            var typeDefaults = hasExecIndex && defaultFieldsByType.TryGetValue(typeLabel, out var d) ? d : null;
+
+            var literalParts = new List<string>();
+            foreach (var (field, value) in literalFieldsByNode[nodeName])
+            {
+                if (typeDefaults != null && typeDefaults.TryGetValue(field, out var defaultValue) && defaultValue == value)
+                    continue;
+                literalParts.Add($"{field} = {value}");
+            }
+
+            var comment = hasExecIndex ? $"// [{step}] {nodeName} ({typeLabel})" : $"// {nodeName} ({typeLabel}, wiring only)";
+            if (literalParts.Count > 0)
+                comment += $": {string.Join(", ", literalParts)}";
+            stringBuilder.AppendLine(comment);
+
+            incomingLinksByNode.TryGetValue(nodeName, out var links);
+            var relevantLinks = links?.Where(l => !(defaultSourceForPin.TryGetValue(l.ToPin, out var defaultFrom) && defaultFrom == l.From)).ToList();
+            if (relevantLinks is { Count: > 0 })
+            {
+                foreach (var (from, toPin) in relevantLinks)
+                    stringBuilder.AppendLine($"{nodeName}.{toPin} = {from};");
+            }
+
+            if (hasExecIndex)
+            {
+                stringBuilder.AppendLine($"{nodeName}.Execute();");
+                stringBuilder.AppendLine();
+                step++;
+            }
+            else
+            {
+                stringBuilder.AppendLine();
+            }
         }
 
         if (strayLinks.Count > 0)
         {
             stringBuilder.AppendLine("// Unresolved links:");
             foreach (var (from, to) in strayLinks)
-                stringBuilder.AppendLine($"{from} -> {to}");
-            stringBuilder.AppendLine();
+                stringBuilder.AppendLine($"// {from} -> {to}");
         }
 
-        stringBuilder.AppendLine("// Exec ('then') chain:");
-        stringBuilder.AppendLine(string.Join(" -> ", execOrder));
-
+        stringBuilder.CloseBlock();
         return stringBuilder.ToString();
+    }
+
+    // "Output" and "Result" are always baked/computed at bake time (never authored), so they're excluded even
+    // though they're transform-shaped - showing them would just reintroduce the noise this exists to remove.
+    private static readonly HashSet<string> _computedTransformFieldNames = ["Output", "Result"];
+
+    private static string? FormatLiteralPinValue(FPropertyTag property)
+    {
+        var value = property.Tag?.GenericValue;
+        var scalar = value switch
+        {
+            FName { IsNone: false } fname => fname.Text.Contains("::") ? fname.Text.SubstringAfterLast("::") : fname.Text,
+            string s when !string.IsNullOrEmpty(s) => s,
+            bool b => b ? "true" : "false",
+            byte or sbyte or short or ushort or int or uint or long or ulong or float or double => value.ToString(),
+            _ => null
+        };
+        if (scalar != null) return scalar;
+
+        // Struct-typed fields (Filter, HierarchyRef, Output, Result, ...) are boilerplate or computed runtime
+        // state and stay hidden - except a non-identity transform offset (e.g. BaseTransform), which is real
+        // authored data and would otherwise vanish with no trace.
+        if (_computedTransformFieldNames.Contains(property.Name.Text))
+            return null;
+
+        return property.Tag?.GetValue(typeof(FStructFallback)) is FStructFallback structValue
+            ? FormatIfNonIdentityTransform(structValue)
+            : null;
+    }
+
+    private static string? FormatIfNonIdentityTransform(FStructFallback structValue)
+    {
+        var rotation = structValue.GetOrDefault<FQuat?>("Rotation", null);
+        var translation = structValue.GetOrDefault<FVector?>("Translation", null) ?? structValue.GetOrDefault<FVector?>("Location", null);
+        var scale = structValue.GetOrDefault<FVector?>("Scale3D", null) ?? structValue.GetOrDefault<FVector?>("Scale", null);
+        if (rotation is null && translation is null && scale is null) return null;
+
+        var parts = new List<string>();
+        if (translation is { } loc && (loc.X != 0 || loc.Y != 0 || loc.Z != 0))
+            parts.Add($"loc=({loc.X:0.###}, {loc.Y:0.###}, {loc.Z:0.###})");
+        if (rotation is { } rot && (rot.X != 0 || rot.Y != 0 || rot.Z != 0 || rot.W != 1))
+            parts.Add($"rot=({rot.X:0.###}, {rot.Y:0.###}, {rot.Z:0.###}, {rot.W:0.###})");
+        if (scale is { } scl && (scl.X != 1 || scl.Y != 1 || scl.Z != 1))
+            parts.Add($"scale=({scl.X:0.###}, {scl.Y:0.###}, {scl.Z:0.###})");
+
+        return parts.Count > 0 ? $"{{{string.Join(", ", parts)}}}" : null;
+    }
+
+    // From SwitchedToRigVM (UE 4.25) the graph no longer bakes to a FControlRigOperator stream: it compiles
+    // to RigVM bytecode on a URigVM object (serialized inline on the generated class and as a "VM" export).
+    // Work/literal memory registers are named "<Node>.<Pin>", so the instruction stream fully describes the
+    // original graph: Execute ops are node invocations, Copy ops are pin wires, literal registers hold the
+    // authored pin values. See Engine/Source/Runtime/RigVM/Public/RigVMCore/RigVMByteCode.h.
+    public static string? DecompileRigVMByteCode(UClass uClass, out HashSet<string> suppressedProperties, out List<string> declarationOrder)
+    {
+        suppressedProperties = [];
+        declarationOrder = [];
+        if (uClass is not URigVMBlueprintGeneratedClass { VM: { } vm }) return null;
+        if (vm.ByteCodeStorage is not { Instructions.Count: > 0 } byteCode) return null;
+
+        // This targets the register-based memory containers (UE 4.25 - 5.0 era). Later property-bag storage
+        // (FRigVMMemoryStorageStruct) carries its own layout and isn't handled here yet.
+        var work = vm.WorkMemoryStorage;
+        var literal = vm.LiteralMemoryStorageOld;
+        var functionNames = vm.FunctionNamesStorage ?? [];
+        if (work is null || literal is null) return null;
+
+        foreach (var name in new[] { "VM", "Hierarchy", "HierarchyContainer", "DrawContainer" })
+            suppressedProperties.Add(name);
+
+        FRigVMRegister? GetRegister(FRigVMOperand operand)
+        {
+            var container = operand.MemoryType switch
+            {
+                ERigVMMemoryType.Work => work,
+                ERigVMMemoryType.Literal => literal,
+                _ => null
+            };
+            if (container is null || operand.RegisterIndex >= container.Registers.Length) return null;
+            return container.Registers[operand.RegisterIndex];
+        }
+
+        // Register names carry compiler markers that aren't valid identifiers: "ExecuteContext!" (the shared
+        // execution context) and "<Node>.<Pin>::IO" (pins that are both input and output).
+        static string SanitizeRegisterName(string name) => name.TrimEnd('!').Replace("::IO", "");
+
+        string FormatOperand(FRigVMOperand operand)
+        {
+            var register = GetRegister(operand);
+            if (register is null) return $"unresolved_{operand.MemoryType.ToString().ToLower()}_{operand.RegisterIndex}";
+
+            var name = SanitizeRegisterName(register.Name.Text);
+            if (operand.RegisterOffset != ushort.MaxValue)
+            {
+                var container = operand.MemoryType == ERigVMMemoryType.Work ? work : literal;
+                if (operand.RegisterOffset < container.RegisterOffsets.Length)
+                    name += FormatRegisterOffsetSuffix(container.RegisterOffsets[operand.RegisterOffset]);
+            }
+            return name;
+        }
+
+        var stringBuilder = new CustomStringBuilder();
+        stringBuilder.AppendLine("// Decompiled ControlRig graph (RigVM bytecode, UE 4.25+).");
+        stringBuilder.AppendLine("// Registers are named <Node>.<Pin>; each Execute() runs one rig unit, cross-node arguments show");
+        stringBuilder.AppendLine("// the pin wiring, and plain assignments are the VM's explicit copy instructions. Authored constants");
+        stringBuilder.AppendLine("// (from literal memory) are shown on each node's comment line - the compiler dedupes identical");
+        stringBuilder.AppendLine("// constants across nodes, so a label may carry the name of the first pin that used the value.");
+        stringBuilder.AppendLine("void Execute()");
+        stringBuilder.OpenBlock();
+
+        // Registers already touched by an earlier instruction. A unit's own output register is written here for
+        // the first time, which is what separates "this node" from an upstream node of the same unit type
+        // feeding one of its inputs (e.g. two chained MathTransformMakeRelative nodes).
+        var writtenRegisters = new HashSet<(ERigVMMemoryType, ushort)>();
+
+        var step = 1;
+        for (var index = 0; index < byteCode.Instructions.Count; index++)
+        {
+            switch (byteCode.Instructions[index])
+            {
+                case FRigVMExecuteOp executeOp:
+                {
+                    var functionName = executeOp.FunctionIndex < functionNames.Length
+                        ? functionNames[executeOp.FunctionIndex].Text
+                        : $"UnknownFunction_{executeOp.FunctionIndex}";
+                    var unitType = functionName.SubstringBefore("::").TrimStart('F');
+                    var unitShortName = unitType.SubstringAfter("RigUnit_");
+
+                    // The node instance name is the "<Node>." prefix of the arguments' register names, restricted
+                    // to prefixes whose stem matches this instruction's unit type (arguments referencing another
+                    // node's output pin carry that node's prefix instead). Where several still match - two chained
+                    // nodes of the same unit type - the node is the one whose register this instruction writes,
+                    // i.e. the one not already produced upstream.
+                    string? nodeName = null;
+                    var freshPrefixes = new List<string>();
+                    var allPrefixes = new List<string>();
+                    foreach (var argument in executeOp.Arguments)
+                    {
+                        var registerName = GetRegister(argument)?.Name.Text;
+                        if (registerName is null || !registerName.Contains('.')) continue;
+                        var prefix = registerName.SubstringBefore('.');
+                        if (prefix.TrimEnd("_0123456789".ToCharArray()) != unitShortName) continue;
+                        allPrefixes.Add(prefix);
+                        if (argument.MemoryType == ERigVMMemoryType.Work && !writtenRegisters.Contains((argument.MemoryType, argument.RegisterIndex)))
+                            freshPrefixes.Add(prefix);
+                    }
+                    nodeName = freshPrefixes.FirstOrDefault() ?? allPrefixes.FirstOrDefault() ?? $"{unitShortName}_{step}";
+
+                    var literalParts = new List<string>();
+                    var callArguments = new List<string>();
+                    foreach (var argument in executeOp.Arguments)
+                    {
+                        var register = GetRegister(argument);
+                        if (register is null) continue;
+                        var registerName = SanitizeRegisterName(register.Name.Text);
+                        if (registerName == "ExecuteContext") continue;
+
+                        if (argument.MemoryType == ERigVMMemoryType.Literal)
+                        {
+                            var pin = registerName.Contains('.') ? registerName.SubstringAfter('.') : registerName;
+                            var part = $"{pin} = {FormatLiteralRegisterValue(register, pin)}";
+                            // Distinct registers can dedupe to the same pin label + value; show it once.
+                            if (!literalParts.Contains(part)) literalParts.Add(part);
+                        }
+                        else if (!registerName.StartsWith(nodeName + '.', StringComparison.Ordinal))
+                        {
+                            // A foreign node's register used directly as an argument = a wire into this node.
+                            callArguments.Add(FormatOperand(argument));
+                        }
+                    }
+
+                    foreach (var argument in executeOp.Arguments)
+                        writtenRegisters.Add((argument.MemoryType, argument.RegisterIndex));
+
+                    if (suppressedProperties.Add(nodeName)) declarationOrder.Add(nodeName);
+
+                    var comment = $"// [{step}] {nodeName} ({unitType})";
+                    if (literalParts.Count > 0) comment += $": {string.Join(", ", literalParts)}";
+                    stringBuilder.AppendLine(comment);
+                    stringBuilder.AppendLine($"{nodeName}.Execute({string.Join(", ", callArguments)});");
+                    stringBuilder.AppendLine();
+                    step++;
+                    break;
+                }
+                case FRigVMCopyOp copyOp:
+                {
+                    var source = GetRegister(copyOp.Source) is { } sourceRegister && copyOp.Source.MemoryType == ERigVMMemoryType.Literal
+                        ? FormatLiteralRegisterValue(sourceRegister)
+                        : FormatOperand(copyOp.Source);
+                    stringBuilder.AppendLine($"{FormatOperand(copyOp.Target)} = {source};");
+                    stringBuilder.AppendLine();
+                    writtenRegisters.Add((copyOp.Target.MemoryType, copyOp.Target.RegisterIndex));
+                    break;
+                }
+                case FRigVMUnaryOp unaryOp:
+                {
+                    var target = FormatOperand(unaryOp.Arg);
+                    var statement = unaryOp.OpCode switch
+                    {
+                        ERigVMOpCode.Zero => $"{target} = 0;",
+                        ERigVMOpCode.BoolFalse => $"{target} = false;",
+                        ERigVMOpCode.BoolTrue => $"{target} = true;",
+                        ERigVMOpCode.Increment => $"{target}++;",
+                        ERigVMOpCode.Decrement => $"{target}--;",
+                        _ => $"// {unaryOp.OpCode} {target}"
+                    };
+                    stringBuilder.AppendLine(statement);
+                    break;
+                }
+                case FRigVMComparisonOp comparisonOp:
+                    stringBuilder.AppendLine($"{FormatOperand(comparisonOp.Result)} = {FormatOperand(comparisonOp.A)} {(comparisonOp.OpCode == ERigVMOpCode.Equals ? "==" : "!=")} {FormatOperand(comparisonOp.B)};");
+                    break;
+                case FRigVMJumpOp jumpOp:
+                    stringBuilder.AppendLine($"// {jumpOp.OpCode} -> instruction {jumpOp.InstructionIndex}");
+                    break;
+                case FRigVMJumpIfOp jumpIfOp:
+                    stringBuilder.AppendLine($"// {jumpIfOp.OpCode} -> instruction {jumpIfOp.InstructionIndex} if {FormatOperand(jumpIfOp.Arg)} == {(jumpIfOp.Condition ? "true" : "false")}");
+                    break;
+                case FRigVMInvokeEntryOp invokeEntryOp:
+                    stringBuilder.AppendLine($"InvokeEntry(\"{invokeEntryOp.EntryName}\");");
+                    break;
+                case FRigVMBaseOp { OpCode: ERigVMOpCode.Exit }:
+                    stringBuilder.AppendLine("return;");
+                    break;
+                case FRigVMBaseOp baseOp:
+                    stringBuilder.AppendLine($"// {baseOp.OpCode}");
+                    break;
+                default:
+                    stringBuilder.AppendLine($"// <{byteCode.Instructions[index].GetType().Name}>");
+                    break;
+            }
+        }
+
+        stringBuilder.CloseBlock();
+        return stringBuilder.ToString();
+    }
+
+    // Pre-SerializeRigVMOffsetSegmentPaths register offsets don't store their segment path as text, only the
+    // target type plus accumulated byte offsets, so sub-pin names are recovered from the layout of the common
+    // math types (FTransform / FVector). Anything outside those keeps an explicit "<type>_at_<offset>" form
+    // rather than guessing a name that might be wrong.
+    private static string FormatRegisterOffsetSuffix(FRigVMRegisterOffset offset)
+    {
+        if (offset.CachedSegmentPath is { Length: > 0 } path) return $".{path}";
+
+        var byteOffset = offset.Segments.Length > 0 ? offset.Segments[0] : 0;
+        return offset.CPPType.Text switch
+        {
+            // FTransform: FQuat Rotation @0, FVector Translation @16, FVector Scale3D @28.
+            "FQuat" when byteOffset == 0 => ".Rotation",
+            "FVector" when byteOffset == 16 => ".Translation",
+            "FVector" when byteOffset == 28 => ".Scale3D",
+            // A float reached through an offset is a component of the enclosing vector/euler triple.
+            "float" or "double" when byteOffset is 0 or 4 or 8 => "." + (char) ('X' + byteOffset / 4),
+            { Length: > 0 } cppType => $".{cppType.TrimStart('F')}_at_{byteOffset}",
+            _ => ""
+        };
+    }
+
+    private static string FormatLiteralRegisterValue(FRigVMRegister register, string? pinName = null)
+    {
+        switch (register.Type)
+        {
+            case ERigVMRegisterType.Name when register.View is FName[] { Length: > 0 } names:
+                return $"FName(\"{names[0].Text}\")";
+            case ERigVMRegisterType.String or ERigVMRegisterType.Struct when register.View is string[] { Length: > 0 } strings:
+                return strings[0];
+            case ERigVMRegisterType.Plain when register.View is byte[] bytes:
+                switch (bytes.Length)
+                {
+                    case 1:
+                        // A single byte is either a bool or a byte-backed enum; the bool-prefix naming
+                        // convention on the pin is the only signal available in cooked data.
+                        var isBoolPin = pinName?.StartsWith('b') ?? false;
+                        return isBoolPin
+                            ? bytes[0] switch { 0 => "false", _ => "true" }
+                            : bytes[0].ToString();
+                    case 4:
+                    {
+                        var asInt = BitConverter.ToInt32(bytes);
+                        if (Math.Abs(asInt) <= 1_000_000) return asInt.ToString();
+                        var asFloat = BitConverter.ToSingle(bytes);
+                        return $"{asFloat.ToString(CultureInfo.InvariantCulture)}f";
+                    }
+                    default:
+                        return $"<{bytes.Length} bytes>";
+                }
+            default:
+                return $"<{register.Type}>";
+        }
     }
 }

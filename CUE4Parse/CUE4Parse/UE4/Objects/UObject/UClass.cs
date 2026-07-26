@@ -122,14 +122,52 @@ public class UClass : UStruct
         stringBuilder.AppendLine(c);
         stringBuilder.OpenBlock();
 
+        // Computed up front: legacy (pre-RigVM) ControlRig classes bake their graph into an "Operators"
+        // stream (on the generated class object from 4.23, on the CDO before that) rather than Kismet
+        // functions. When present, the raw property dump below would otherwise repeat every RigUnit node's
+        // full baked transform state (and the entire skeleton pose via "Hierarchy") in addition to the
+        // already-decompiled graph, so those are collapsed to bare declarations.
+        var controlRigOperators = BlueprintDecompilerUtils.DecompileControlRigOperators(this, classDefaultObject, out var controlRigNodeNames, out var controlRigDeclarationOrder);
+        var controlRigSuppressedProperties = controlRigOperators != null
+            ? new HashSet<string>(controlRigNodeNames) { "Operators", "Hierarchy" }
+            : [];
+
+        // RigVM era (UE 4.25+): the graph lives in bytecode on the class's VM instead of an Operators stream.
+        if (controlRigOperators == null)
+        {
+            controlRigOperators = BlueprintDecompilerUtils.DecompileRigVMByteCode(this, out var rigVMSuppressedProperties, out var rigVMDeclarationOrder);
+            if (controlRigOperators != null)
+            {
+                controlRigSuppressedProperties = rigVMSuppressedProperties;
+                controlRigDeclarationOrder = rigVMDeclarationOrder;
+            }
+        }
+
         var distinct = new HashSet<string>();
-        var variables = new Dictionary<string, EAccessMode>();
+        var propertyOrder = new List<string>();
+        var declarationByProperty = new Dictionary<string, (string Line, EAccessMode Mode)>();
 
         var combined = Properties.Concat(classDefaultObject?.Properties ?? []).Concat(classDefaultObject?.SerializedSparseClassData?.Properties ?? []);
         foreach (var property in combined)
         {
             if (!distinct.Add(property.Name.Text)) continue;
-            variables.TryAdd(property.GetCppVariable(), EAccessMode.Public); // should always be public
+            propertyOrder.Add(property.Name.Text);
+
+            if (controlRigSuppressedProperties.Contains(property.Name.Text))
+            {
+                BlueprintDecompilerUtils.GetPropertyTagVariable(property, out var suppressedType, out _);
+                var reason = property.Name.Text switch
+                {
+                    "Operators" or "VM" => "see decompiled ControlRig graph below",
+                    "Hierarchy" or "HierarchyContainer" => "skeleton bind pose omitted for brevity",
+                    "DrawContainer" => "editor draw instructions omitted for brevity",
+                    _ => "wiring shown in decompiled ControlRig graph below"
+                };
+                declarationByProperty[property.Name.Text] = ($"{suppressedType} {property.Name.Text}; // {reason}", EAccessMode.Public);
+                continue;
+            }
+
+            declarationByProperty[property.Name.Text] = (property.GetCppVariable(), EAccessMode.Public); // should always be public
         }
         foreach (var childProperty in ChildProperties ?? [])
         {
@@ -140,8 +178,29 @@ public class UClass : UStruct
             if (variableType is null)
                 continue;
 
+            propertyOrder.Add(property.Name.Text);
             var value = variableValue is null ? string.Empty : $" = {variableValue}";
-            variables.TryAdd($"{variableType} {property.Name.Text}{value};", property.GetAccessMode());
+            declarationByProperty[property.Name.Text] = ($"{variableType} {property.Name.Text}{value};", property.GetAccessMode());
+        }
+
+        // For ControlRig classes, declare graph-related properties in first-use order (matching the
+        // decompiled graph below) instead of whatever order they happened to serialize in on the CDO.
+        var finalPropertyOrder = propertyOrder;
+        if (controlRigDeclarationOrder.Count > 0)
+        {
+            finalPropertyOrder = [];
+            var orderedSeen = new HashSet<string>();
+            foreach (var name in controlRigDeclarationOrder)
+                if (declarationByProperty.ContainsKey(name) && orderedSeen.Add(name)) finalPropertyOrder.Add(name);
+            foreach (var name in propertyOrder)
+                if (orderedSeen.Add(name)) finalPropertyOrder.Add(name);
+        }
+
+        var variables = new Dictionary<string, EAccessMode>();
+        foreach (var name in finalPropertyOrder)
+        {
+            var (line, mode) = declarationByProperty[name];
+            variables.TryAdd(line, mode);
         }
 
         foreach (var group in variables.GroupBy(pair => pair.Value))
@@ -156,7 +215,6 @@ public class UClass : UStruct
             }
         }
 
-        var controlRigOperators = BlueprintDecompilerUtils.DecompileControlRigOperators(classDefaultObject);
         if (controlRigOperators != null)
         {
             stringBuilder.AppendLine();

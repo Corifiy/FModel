@@ -1,5 +1,6 @@
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
+using CUE4Parse.UE4.Versions;
 
 namespace CUE4Parse.UE4.Objects.RigVM;
 
@@ -31,8 +32,10 @@ public class FRigVMRegister
         TrailingBytes = Ar.Read<ushort>();
         Name = Ar.ReadFName();
         ScriptStructIndex = Ar.Read<int>();
-        bIsArray = Ar.ReadBoolean();
-        bIsDynamic = Ar.ReadBoolean();
+        // Both bools are version-gated (FRigVMRegister::Serialize, RigVMMemory.cpp): builds cooked from
+        // pre-release 4.26 snapshots (e.g. Fortnite 14.x) have bIsArray but not yet bIsDynamic.
+        bIsArray = FAnimObjectVersion.Get(Ar) >= FAnimObjectVersion.Type.SerializeRigVMRegisterArrayState && Ar.ReadBoolean();
+        bIsDynamic = FAnimObjectVersion.Get(Ar) >= FAnimObjectVersion.Type.SerializeRigVMRegisterDynamicState && Ar.ReadBoolean();
     }
 
     public bool IsDynamic() => bIsDynamic;
