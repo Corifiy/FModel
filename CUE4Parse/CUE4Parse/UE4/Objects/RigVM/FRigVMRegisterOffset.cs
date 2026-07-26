@@ -16,7 +16,7 @@ namespace CUE4Parse.UE4.Objects.RigVM
         public readonly string? CachedSegmentPath;
         public readonly int ArrayIndex;
 
-        public FRigVMRegisterOffset(FAssetArchive Ar)
+        public FRigVMRegisterOffset(FAssetArchive Ar, FRigVMMemoryLayout layout)
         {
             Segments = Ar.ReadArray<int>();
             Type = Ar.Read<ERigVMRegisterType>();
@@ -25,7 +25,7 @@ namespace CUE4Parse.UE4.Objects.RigVM
             // FRigVMRegisterOffset::Serialize (RigVMMemory.cpp): before FReleaseObjectVersion
             // SerializeRigVMOffsetSegmentPaths (late 4.26) the struct is stored as an FName object path
             // and there is no ParentScriptStruct/SegmentPath/ArrayIndex tail.
-            if (FReleaseObjectVersion.Get(Ar) < FReleaseObjectVersion.Type.SerializeRigVMOffsetSegmentPaths)
+            if (!layout.bSerializeOffsetSegmentPaths)
             {
                 ScriptStructPath = Ar.ReadFName();
                 ElementSize = Ar.Read<ushort>();

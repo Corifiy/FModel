@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
 using CUE4Parse.UE4.Assets.Readers;
+using CUE4Parse.UE4.Exceptions;
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Versions;
 using Newtonsoft.Json;
+using Serilog;
 
 namespace CUE4Parse.UE4.Objects.RigVM;
 
@@ -26,6 +29,51 @@ public class URigVM : Assets.Exports.UObject
     public FRigVMMemoryContainer? DefaultDebugMemoryStorageOld;
     public FRigVMRegistry_NoLock? LocalizedRegistry;
 
+    /// <summary>
+    /// Reads the UClass-based storage block (UE 4.25 - 5.0), probing the candidate layouts from
+    /// <see cref="FRigVMMemoryLayout"/> until the whole block parses cleanly. The members here are all gated
+    /// on custom versions that unversioned cooked packages don't carry, and the engine version alone can't
+    /// tell a release apart from a mid-development snapshot of it, so the byte stream decides. Probing spans
+    /// the entire block because a wrong guess in the memory containers only surfaces later, as a garbage
+    /// FName once <see cref="FRigVMParameter"/> is reached.
+    /// </summary>
+    private void ReadUClassBasedStorage(FAssetArchive Ar)
+    {
+        var start = Ar.Position;
+        var candidates = FRigVMMemoryLayout.GetCandidates(Ar);
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            Ar.Position = start;
+            try
+            {
+                var workMemory = new FRigVMMemoryContainer(Ar, candidates[i]);
+                var literalMemory = new FRigVMMemoryContainer(Ar, candidates[i]);
+                if (!workMemory.LooksValid() || !literalMemory.LooksValid()) continue;
+
+                var functionNames = Ar.ReadArray(Ar.ReadFName);
+                var byteCode = new FRigVMByteCode(Ar, candidates[i]);
+                var parameters = Ar.ReadArray(() => new FRigVMParameter(Ar));
+
+                if (i > 0)
+                    Log.Debug("RigVM did not match the layout implied by the package's engine version; using {Layout} instead", candidates[i]);
+
+                WorkMemoryStorage = workMemory;
+                LiteralMemoryStorageOld = literalMemory;
+                FunctionNamesStorage = functionNames;
+                ByteCodeStorage = byteCode;
+                Parameters = parameters;
+                return;
+            }
+            catch (Exception e) when (e is ParserException or ArgumentException or IndexOutOfRangeException or ArgumentOutOfRangeException)
+            {
+                // A wrong layout desyncs the stream, so a failure here just rules this candidate out.
+            }
+        }
+
+        Ar.Position = start;
+        throw new ParserException(Ar, "Could not read RigVM storage with any known serialization layout");
+    }
+
     public override void Deserialize(FAssetArchive Ar, long validPos)
     {
         if (FAnimObjectVersion.Get(Ar) < FAnimObjectVersion.Type.StoreMarkerNamesOnSkeleton) return;
@@ -45,11 +93,7 @@ public class URigVM : Assets.Exports.UObject
 
             if (RigVMUClassBasedStorageDefine == 1)
             {
-                WorkMemoryStorage = new FRigVMMemoryContainer(Ar);
-                LiteralMemoryStorageOld = new FRigVMMemoryContainer(Ar);
-                FunctionNamesStorage = Ar.ReadArray(Ar.ReadFName);
-                ByteCodeStorage = new FRigVMByteCode(Ar);
-                Parameters = Ar.ReadArray(() => new FRigVMParameter(Ar));
+                ReadUClassBasedStorage(Ar);
 
                 if (FUE5MainStreamObjectVersion.Get(Ar) < FUE5MainStreamObjectVersion.Type.RigVMCopyOpStoreNumBytes) return;
 

@@ -2163,46 +2163,14 @@ public static class BlueprintDecompilerUtils
         if (uClass is not URigVMBlueprintGeneratedClass { VM: { } vm }) return null;
         if (vm.ByteCodeStorage is not { Instructions.Count: > 0 } byteCode) return null;
 
-        // This targets the register-based memory containers (UE 4.25 - 5.0 era). Later property-bag storage
-        // (FRigVMMemoryStorageStruct) carries its own layout and isn't handled here yet.
-        var work = vm.WorkMemoryStorage;
-        var literal = vm.LiteralMemoryStorageOld;
+        var storage = RigVMStorage.Resolve(uClass, vm);
         var functionNames = vm.FunctionNamesStorage ?? [];
-        if (work is null || literal is null) return null;
+        if (storage is null) return null;
 
-        foreach (var name in new[] { "VM", "Hierarchy", "HierarchyContainer", "DrawContainer" })
+        foreach (var name in new[] { "VM", "Hierarchy", "HierarchyContainer", "DrawContainer", "DynamicHierarchy" })
             suppressedProperties.Add(name);
 
-        FRigVMRegister? GetRegister(FRigVMOperand operand)
-        {
-            var container = operand.MemoryType switch
-            {
-                ERigVMMemoryType.Work => work,
-                ERigVMMemoryType.Literal => literal,
-                _ => null
-            };
-            if (container is null || operand.RegisterIndex >= container.Registers.Length) return null;
-            return container.Registers[operand.RegisterIndex];
-        }
-
-        // Register names carry compiler markers that aren't valid identifiers: "ExecuteContext!" (the shared
-        // execution context) and "<Node>.<Pin>::IO" (pins that are both input and output).
-        static string SanitizeRegisterName(string name) => name.TrimEnd('!').Replace("::IO", "");
-
-        string FormatOperand(FRigVMOperand operand)
-        {
-            var register = GetRegister(operand);
-            if (register is null) return $"unresolved_{operand.MemoryType.ToString().ToLower()}_{operand.RegisterIndex}";
-
-            var name = SanitizeRegisterName(register.Name.Text);
-            if (operand.RegisterOffset != ushort.MaxValue)
-            {
-                var container = operand.MemoryType == ERigVMMemoryType.Work ? work : literal;
-                if (operand.RegisterOffset < container.RegisterOffsets.Length)
-                    name += FormatRegisterOffsetSuffix(container.RegisterOffsets[operand.RegisterOffset]);
-            }
-            return name;
-        }
+        string FormatOperand(FRigVMOperand operand) => storage.FormatOperand(operand);
 
         var stringBuilder = new CustomStringBuilder();
         stringBuilder.AppendLine("// Decompiled ControlRig graph (RigVM bytecode, UE 4.25+).");
@@ -2241,7 +2209,7 @@ public static class BlueprintDecompilerUtils
                     var allPrefixes = new List<string>();
                     foreach (var argument in executeOp.Arguments)
                     {
-                        var registerName = GetRegister(argument)?.Name.Text;
+                        var registerName = storage.GetRegisterName(argument);
                         if (registerName is null || !registerName.Contains('.')) continue;
                         var prefix = registerName.SubstringBefore('.');
                         if (prefix.TrimEnd("_0123456789".ToCharArray()) != unitShortName) continue;
@@ -2255,15 +2223,14 @@ public static class BlueprintDecompilerUtils
                     var callArguments = new List<string>();
                     foreach (var argument in executeOp.Arguments)
                     {
-                        var register = GetRegister(argument);
-                        if (register is null) continue;
-                        var registerName = SanitizeRegisterName(register.Name.Text);
+                        var registerName = storage.GetRegisterName(argument);
+                        if (registerName is null) continue;
                         if (registerName == "ExecuteContext") continue;
 
                         if (argument.MemoryType == ERigVMMemoryType.Literal)
                         {
                             var pin = registerName.Contains('.') ? registerName.SubstringAfter('.') : registerName;
-                            var part = $"{pin} = {FormatLiteralRegisterValue(register, pin)}";
+                            var part = $"{pin} = {storage.FormatLiteralValue(argument, pin)}";
                             // Distinct registers can dedupe to the same pin label + value; show it once.
                             if (!literalParts.Contains(part)) literalParts.Add(part);
                         }
@@ -2289,8 +2256,8 @@ public static class BlueprintDecompilerUtils
                 }
                 case FRigVMCopyOp copyOp:
                 {
-                    var source = GetRegister(copyOp.Source) is { } sourceRegister && copyOp.Source.MemoryType == ERigVMMemoryType.Literal
-                        ? FormatLiteralRegisterValue(sourceRegister)
+                    var source = copyOp.Source.MemoryType == ERigVMMemoryType.Literal
+                        ? storage.FormatLiteralValue(copyOp.Source, null)
                         : FormatOperand(copyOp.Source);
                     stringBuilder.AppendLine($"{FormatOperand(copyOp.Target)} = {source};");
                     stringBuilder.AppendLine();
@@ -2338,60 +2305,5 @@ public static class BlueprintDecompilerUtils
 
         stringBuilder.CloseBlock();
         return stringBuilder.ToString();
-    }
-
-    // Pre-SerializeRigVMOffsetSegmentPaths register offsets don't store their segment path as text, only the
-    // target type plus accumulated byte offsets, so sub-pin names are recovered from the layout of the common
-    // math types (FTransform / FVector). Anything outside those keeps an explicit "<type>_at_<offset>" form
-    // rather than guessing a name that might be wrong.
-    private static string FormatRegisterOffsetSuffix(FRigVMRegisterOffset offset)
-    {
-        if (offset.CachedSegmentPath is { Length: > 0 } path) return $".{path}";
-
-        var byteOffset = offset.Segments.Length > 0 ? offset.Segments[0] : 0;
-        return offset.CPPType.Text switch
-        {
-            // FTransform: FQuat Rotation @0, FVector Translation @16, FVector Scale3D @28.
-            "FQuat" when byteOffset == 0 => ".Rotation",
-            "FVector" when byteOffset == 16 => ".Translation",
-            "FVector" when byteOffset == 28 => ".Scale3D",
-            // A float reached through an offset is a component of the enclosing vector/euler triple.
-            "float" or "double" when byteOffset is 0 or 4 or 8 => "." + (char) ('X' + byteOffset / 4),
-            { Length: > 0 } cppType => $".{cppType.TrimStart('F')}_at_{byteOffset}",
-            _ => ""
-        };
-    }
-
-    private static string FormatLiteralRegisterValue(FRigVMRegister register, string? pinName = null)
-    {
-        switch (register.Type)
-        {
-            case ERigVMRegisterType.Name when register.View is FName[] { Length: > 0 } names:
-                return $"FName(\"{names[0].Text}\")";
-            case ERigVMRegisterType.String or ERigVMRegisterType.Struct when register.View is string[] { Length: > 0 } strings:
-                return strings[0];
-            case ERigVMRegisterType.Plain when register.View is byte[] bytes:
-                switch (bytes.Length)
-                {
-                    case 1:
-                        // A single byte is either a bool or a byte-backed enum; the bool-prefix naming
-                        // convention on the pin is the only signal available in cooked data.
-                        var isBoolPin = pinName?.StartsWith('b') ?? false;
-                        return isBoolPin
-                            ? bytes[0] switch { 0 => "false", _ => "true" }
-                            : bytes[0].ToString();
-                    case 4:
-                    {
-                        var asInt = BitConverter.ToInt32(bytes);
-                        if (Math.Abs(asInt) <= 1_000_000) return asInt.ToString();
-                        var asFloat = BitConverter.ToSingle(bytes);
-                        return $"{asFloat.ToString(CultureInfo.InvariantCulture)}f";
-                    }
-                    default:
-                        return $"<{bytes.Length} bytes>";
-                }
-            default:
-                return $"<{register.Type}>";
-        }
     }
 }

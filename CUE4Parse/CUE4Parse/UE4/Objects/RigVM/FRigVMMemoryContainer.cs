@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using CUE4Parse.UE4.Assets.Readers;
 
 namespace CUE4Parse.UE4.Objects.RigVM;
@@ -12,12 +13,20 @@ public class FRigVMMemoryContainer
     public string[] ScriptStructPaths;
     public ulong TotalBytes;
 
-    public FRigVMMemoryContainer(FAssetArchive Ar)
+    /// <summary>
+    /// Cheap sanity check used to reject a layout that parsed without throwing. Script struct entries are
+    /// object paths, so anything else means the stream desynced.
+    /// </summary>
+    public bool LooksValid() =>
+        ScriptStructPaths.All(path => path.StartsWith('/')) &&
+        Registers.All(register => register.ScriptStructIndex < ScriptStructPaths.Length);
+
+    public FRigVMMemoryContainer(FAssetArchive Ar, FRigVMMemoryLayout layout)
     {
         bUseNameMap = Ar.ReadBoolean();
         MemoryType = Ar.Read<ERigVMMemoryType>();
-        Registers = Ar.ReadArray(() => new FRigVMRegister(Ar));
-        RegisterOffsets = Ar.ReadArray(() => new FRigVMRegisterOffset(Ar));
+        Registers = Ar.ReadArray(() => new FRigVMRegister(Ar, layout));
+        RegisterOffsets = Ar.ReadArray(() => new FRigVMRegisterOffset(Ar, layout));
         ScriptStructPaths = Ar.ReadArray(Ar.ReadFString);
         TotalBytes = Ar.Read<ulong>();
 

@@ -20,7 +20,7 @@ public class FRigVMRegister
     public readonly bool bIsDynamic;
     public object? View;
 
-    public FRigVMRegister(FArchive Ar)
+    public FRigVMRegister(FArchive Ar, FRigVMMemoryLayout layout)
     {
         Type = Ar.Read<ERigVMRegisterType>();
         ByteIndex = Ar.Read<uint>();
@@ -34,8 +34,8 @@ public class FRigVMRegister
         ScriptStructIndex = Ar.Read<int>();
         // Both bools are version-gated (FRigVMRegister::Serialize, RigVMMemory.cpp): builds cooked from
         // pre-release 4.26 snapshots (e.g. Fortnite 14.x) have bIsArray but not yet bIsDynamic.
-        bIsArray = FAnimObjectVersion.Get(Ar) >= FAnimObjectVersion.Type.SerializeRigVMRegisterArrayState && Ar.ReadBoolean();
-        bIsDynamic = FAnimObjectVersion.Get(Ar) >= FAnimObjectVersion.Type.SerializeRigVMRegisterDynamicState && Ar.ReadBoolean();
+        bIsArray = layout.bSerializeRegisterArrayState && Ar.ReadBoolean();
+        bIsDynamic = layout.bSerializeRegisterDynamicState && Ar.ReadBoolean();
     }
 
     public bool IsDynamic() => bIsDynamic;
