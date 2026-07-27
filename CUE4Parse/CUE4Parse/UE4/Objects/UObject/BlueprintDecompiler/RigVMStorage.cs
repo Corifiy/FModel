@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using CUE4Parse.UE4.Assets.Exports.Rig;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Misc;
@@ -125,8 +126,11 @@ internal abstract class RigVMStorage
     /// </summary>
     private sealed class GeneratedClassStorage : RigVMStorage
     {
-        /// <summary>A register: the generated property name as stored, plus that name split into "Node.Pin".</summary>
-        private readonly record struct Register(string RawName, string Name);
+        /// <summary>
+        /// A register: the generated property name as stored, that name split into "Node.Pin", and the
+        /// reflected property itself (needed to name the type default when no value was serialized).
+        /// </summary>
+        private readonly record struct Register(string RawName, string Name, FProperty? Property);
 
         private readonly Dictionary<ERigVMMemoryType, Register[]> _registers;
         private readonly Dictionary<string, FPropertyTag> _literalValues;
@@ -152,9 +156,13 @@ internal abstract class RigVMStorage
             if (generatorClasses.Length == 0) return null;
 
             // The unit type names double as the node-name stems, which is what lets a flattened
-            // "Node_Pin" property name be split back into its node and pin halves.
+            // "Node_Pin" property name be split back into its node and pin halves. A node keeps the full
+            // struct name ("RigUnit_GetInitialBoneTransform_2_4") unless it was renamed in the editor, in
+            // which case it uses the short name ("MathVectorAdd_2_4_2") - so both spellings are candidates,
+            // longest first so the fuller one wins where they'd both match.
             var unitNames = (vm.FunctionNamesStorage ?? [])
-                .Select(function => function.Text.SubstringBefore("::").TrimStart('F').SubstringAfter("RigUnit_"))
+                .Select(function => function.Text.SubstringBefore("::").TrimStart('F'))
+                .SelectMany(name => new[] { name, name.SubstringAfter("RigUnit_") })
                 .Where(name => name.Length > 0)
                 .Distinct()
                 .OrderByDescending(name => name.Length)
@@ -165,7 +173,7 @@ internal abstract class RigVMStorage
             foreach (var generatorClass in generatorClasses)
             {
                 registers[generatorClass.MemoryType] = (generatorClass.ChildProperties ?? [])
-                    .Select(property => new Register(property.Name.Text, NormalizeName(property.Name.Text, unitNames)))
+                    .Select(property => new Register(property.Name.Text, NormalizeName(property.Name.Text, unitNames), property as FProperty))
                     .ToArray();
 
                 if (generatorClass.MemoryType == ERigVMMemoryType.Work)
@@ -190,8 +198,11 @@ internal abstract class RigVMStorage
         /// </summary>
         private static string NormalizeName(string propertyName, string[] unitNames)
         {
+            // "__Const" marks a literal and "__IO" a pin that is both an input and an output; neither is
+            // part of the pin name. Trailing '_' is how the generator escapes an otherwise empty tail.
             var name = propertyName;
-            if (name.EndsWith("__Const", StringComparison.Ordinal)) name = name[..^"__Const".Length];
+            foreach (var marker in new[] { "__Const", "__IO" })
+                if (name.EndsWith(marker, StringComparison.Ordinal)) name = name[..^marker.Length];
             name = name.TrimEnd('_');
 
             foreach (var unitName in unitNames)
@@ -223,8 +234,40 @@ internal abstract class RigVMStorage
             if (_literalValues.TryGetValue(register.RawName, out var property))
                 return FormatPropertyValue(property, pinName);
 
-            // A literal left at its type default isn't written to the CDO at all.
-            return "default";
+            // Unversioned property serialization omits anything still equal to its type default, so a literal
+            // that is missing from the CDO is not unknown - it is the default, which is worth naming outright.
+            return FormatTypeDefault(register.Property);
+        }
+
+        /// <summary>
+        /// Names the zero value a property falls back to when the package stores nothing for it. Enums are the
+        /// case that actually matters (a bare "default" hides whether a pin means LocalSpace or GlobalSpace),
+        /// and their entry names come from the mappings since the enum itself lives in a script package.
+        /// </summary>
+        private static string FormatTypeDefault(FProperty? property)
+        {
+            var enumName = property switch
+            {
+                FEnumProperty enumProperty => enumProperty.Enum.Name,
+                FByteProperty byteProperty => byteProperty.Enum.Name,
+                _ => null
+            };
+
+            if (!string.IsNullOrEmpty(enumName) &&
+                BlueprintDecompilerUtils.Mappings?.Enums.TryGetValue(enumName, out var entries) == true &&
+                entries.TryGetValue(0, out var zeroName))
+            {
+                return zeroName.Contains("::") ? zeroName : $"{enumName}::{zeroName}";
+            }
+
+            return property switch
+            {
+                FBoolProperty => "false",
+                FNameProperty => "FName(\"None\")",
+                FStrProperty => "\"\"",
+                FNumericProperty => "0",
+                _ => "default"
+            };
         }
 
         protected override string? GetOffsetSuffix(FRigVMOperand operand)
@@ -232,26 +275,47 @@ internal abstract class RigVMStorage
             if (operand.MemoryType != ERigVMMemoryType.Work || operand.RegisterOffset >= _workPropertyPaths.Length)
                 return null;
 
-            // UE 5.0 stores the segment path as text, so the sub-pin name needs no reconstruction.
+            // UE 5.0 stores the segment path as text, so the sub-pin name needs no reconstruction - only
+            // the array steps, which arrive as bare numbers ("BoneToModify/0/Transform"), need subscripting.
             var segmentPath = _workPropertyPaths[operand.RegisterOffset].SegmentPath;
-            return string.IsNullOrEmpty(segmentPath) ? null : "." + segmentPath.Replace('/', '.');
+            if (string.IsNullOrEmpty(segmentPath)) return null;
+
+            var suffix = new StringBuilder();
+            foreach (var segment in segmentPath.Split(['/', '.'], StringSplitOptions.RemoveEmptyEntries))
+                suffix.Append(segment.All(char.IsDigit) ? $"[{segment}]" : $".{segment}");
+            return suffix.ToString();
         }
 
         private static string FormatPropertyValue(FPropertyTag property, string? pinName)
         {
             var value = property.Tag?.GenericValue;
-            return value switch
+            switch (value)
             {
                 // Byte-backed enums surface as a qualified FName ("EBoneGetterSetterMode::GlobalSpace"),
                 // which is already valid C++ - only genuine name pins want the FName(...) wrapper.
-                FName enumValue when enumValue.Text.Contains("::") => enumValue.Text,
-                FName name => $"FName(\"{name.Text}\")",
-                string text => $"\"{text}\"",
-                bool flag => flag ? "true" : "false",
-                float or double => Convert.ToString(value, CultureInfo.InvariantCulture) + "f",
-                byte or sbyte or short or ushort or int or uint or long or ulong => value.ToString()!,
-                _ => property.Tag?.ToString() ?? "default"
-            };
+                case FName enumValue when enumValue.Text.Contains("::"): return enumValue.Text;
+                case FName name: return $"FName(\"{name.Text}\")";
+                case string text: return $"\"{text}\"";
+                case bool flag: return flag ? "true" : "false";
+                case float or double: return Convert.ToString(value, CultureInfo.InvariantCulture) + "f";
+                case byte or sbyte or short or ushort or int or uint or long or ulong: return value.ToString()!;
+            }
+
+            // Structs and arrays (a bone list, a transform, ...) go through the same renderer the class dump
+            // uses, so they read as C++ initialisers rather than an internal type description. These carry
+            // real authored data - the bone a node drives, its offset - so the budget is generous; only a
+            // genuinely unwieldy list collapses, and then to a count rather than nothing.
+            if (property.Tag is not null && BlueprintDecompilerUtils.GetPropertyTagVariable(property, out _, out var rendered) && rendered.Length > 0)
+            {
+                var singleLine = string.Join(' ', rendered.Split('\n').Select(line => line.Trim()));
+                if (singleLine.Length <= 300) return singleLine;
+
+                // Still a valid initialiser, just an empty one carrying the count in a comment.
+                var elementCount = (property.Tag.GenericValue as UScriptArray)?.Properties.Count;
+                return elementCount is { } count ? $"{{ /* {count} elements */ }}" : "{ /* ... */ }";
+            }
+
+            return "default";
         }
     }
 
