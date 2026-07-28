@@ -37,12 +37,28 @@ internal abstract class RigVMStorage
         return name + (operand.RegisterOffset != ushort.MaxValue ? GetOffsetSuffix(operand) ?? "" : "");
     }
 
+    /// <summary>
+    /// External operands address the host's own variables, which the engine enumerates as the class's
+    /// non-native properties in declaration order (URigVMHost::GetExternalVariablesImpl) - i.e. exactly the
+    /// generated class's ChildProperties.
+    /// </summary>
+    protected string[] ExternalNames = [];
+
+    protected string? GetExternalName(FRigVMOperand operand) =>
+        operand.RegisterIndex < ExternalNames.Length ? ExternalNames[operand.RegisterIndex] : null;
+
     public static RigVMStorage? Resolve(UClass uClass, URigVM vm)
     {
         if (vm.WorkMemoryStorage is { } work && vm.LiteralMemoryStorageOld is { } literal)
             return new ContainerStorage(work, literal);
 
-        return GeneratedClassStorage.TryCreate(uClass, vm);
+        // UE 5.1+ moved the register tables onto the VM as property bags. The generated classes usually still
+        // exist alongside them but are stale - shorter, and diverging in order partway through - so the bags
+        // win wherever they are present.
+        var storage = PropertyBagStorage.TryCreate(uClass, vm) ?? (RigVMStorage?) GeneratedClassStorage.TryCreate(uClass, vm);
+        if (storage is not null)
+            storage.ExternalNames = (uClass.ChildProperties ?? []).Select(property => property.Name.Text).ToArray();
+        return storage;
     }
 
     /// <summary>
@@ -50,6 +66,122 @@ internal abstract class RigVMStorage
     /// shared execution context and "Node.Pin::IO" for pins that are both an input and an output.
     /// </summary>
     protected static string StripMarkers(string name) => name.TrimEnd('!').Replace("::IO", "");
+
+    /// <summary>A register: the name as stored, that name split into "Node.Pin", and the reflected property.</summary>
+    protected readonly record struct Register(string RawName, string Name, FProperty? Property);
+
+    /// <summary>
+    /// Unit type names double as node-name stems, which is what lets a flattened "Node_Pin" property name be
+    /// split back into its halves. A node keeps the full struct name unless it was renamed in the editor, so
+    /// both spellings are candidates, longest first.
+    /// </summary>
+    protected static string[] GetUnitNames(URigVM vm) => (vm.FunctionNamesStorage ?? [])
+        .Select(function => function.Text.SubstringBefore("::").TrimStart('F'))
+        .SelectMany(name => new[]
+        {
+            name,
+            name.SubstringAfter("RigUnit_"),
+            name.SubstringAfter("RigVMFunction_"),
+            // Dispatch factories are named "DISPATCH_RigVMDispatch_If" but their nodes are just "If".
+            name.SubstringAfter("DISPATCH_RigVMDispatch_").SubstringAfter("RigVMDispatch_")
+        })
+        .Where(name => name.Length > 0)
+        .Distinct()
+        .OrderByDescending(name => name.Length)
+        .ToArray();
+
+    /// <summary>
+    /// Turns a generated property name back into "Node.Pin". The generator flattens the pin path into the
+    /// name ("GetInitialBoneTransform_0_Space__Const"), optionally behind the graph it belongs to
+    /// ("RigVMModel___SphericalPoseReader_1_DriverItem__Const"), so the graph prefix is dropped and the node
+    /// half is recovered by matching a known unit type name plus its instance suffix.
+    /// </summary>
+    protected static string NormalizeName(string propertyName, string[] unitNames)
+    {
+        // "__Const" marks a literal and "__IO" a pin that is both an input and an output; neither is part of
+        // the pin name. Trailing '_' is how the generator escapes an otherwise empty tail.
+        var name = propertyName;
+        foreach (var marker in new[] { "__Const", "__IO" })
+            if (name.EndsWith(marker, StringComparison.Ordinal)) name = name[..^marker.Length];
+        name = name.TrimEnd('_');
+
+        // "<Graph>___<Node>_<Pin>": the graph path separator survives as a triple underscore.
+        const string graphSeparator = "___";
+        var separatorIndex = name.LastIndexOf(graphSeparator, StringComparison.Ordinal);
+        if (separatorIndex >= 0) name = name[(separatorIndex + graphSeparator.Length)..];
+
+        foreach (var unitName in unitNames)
+        {
+            if (!name.StartsWith(unitName, StringComparison.Ordinal)) continue;
+
+            // Consume the instance suffix the compiler appends to disambiguate nodes ("_0", "_1_2", ...).
+            var index = unitName.Length;
+            while (index < name.Length && name[index] == '_' && index + 1 < name.Length && char.IsDigit(name[index + 1]))
+            {
+                index++;
+                while (index < name.Length && char.IsDigit(name[index])) index++;
+            }
+
+            if (index < name.Length && name[index] == '_')
+                return $"{name[..index]}.{name[(index + 1)..]}";
+        }
+
+        return name;
+    }
+
+    /// <summary>Only the literal CDO matters: work memory holds runtime state, not authored values.</summary>
+    protected static Dictionary<string, FPropertyTag> ReadLiteralCdo(UClass uClass) =>
+        uClass.Owner?.GetExports()
+            .FirstOrDefault(export => export.Name.StartsWith("Default__RigVMMemory_Literal", StringComparison.OrdinalIgnoreCase))
+            ?.Properties
+            .GroupBy(property => property.Name.Text)
+            .ToDictionary(group => group.Key, group => group.First()) ?? [];
+
+    /// <summary>
+    /// UE 5 stores sub-pin paths as text, so no reconstruction is needed - only the array steps, which arrive
+    /// as bare numbers ("BoneToModify/0/Transform"), need subscripting.
+    /// </summary>
+    protected static string? FormatSegmentPath(string? segmentPath)
+    {
+        if (string.IsNullOrEmpty(segmentPath)) return null;
+
+        var suffix = new StringBuilder();
+        foreach (var segment in segmentPath.Split(['/', '.'], StringSplitOptions.RemoveEmptyEntries))
+            suffix.Append(segment.All(char.IsDigit) ? $"[{segment}]" : $".{segment}");
+        return suffix.ToString();
+    }
+
+    protected static string FormatPropertyValue(FPropertyTag property, string? pinName)
+    {
+        var value = property.Tag?.GenericValue;
+        switch (value)
+        {
+            // Byte-backed enums surface as a qualified FName ("EBoneGetterSetterMode::GlobalSpace"), which is
+            // already valid C++ - only genuine name pins want the FName(...) wrapper.
+            case FName enumValue when enumValue.Text.Contains("::"): return enumValue.Text;
+            case FName name: return $"FName(\"{name.Text}\")";
+            case string text: return $"\"{text}\"";
+            case bool flag: return flag ? "true" : "false";
+            case float or double: return Convert.ToString(value, CultureInfo.InvariantCulture) + "f";
+            case byte or sbyte or short or ushort or int or uint or long or ulong: return value.ToString()!;
+        }
+
+        // Structs and arrays (a bone list, a transform, ...) go through the same renderer the class dump uses,
+        // so they read as C++ initialisers rather than an internal type description. These carry real authored
+        // data - the bone a node drives, its offset - so the budget is generous; only a genuinely unwieldy
+        // list collapses, and then to a count rather than nothing.
+        if (property.Tag is not null && BlueprintDecompilerUtils.GetPropertyTagVariable(property, out _, out var rendered) && rendered.Length > 0)
+        {
+            var singleLine = string.Join(' ', rendered.Split('\n').Select(line => line.Trim()));
+
+            // A bone list with its per-bone offsets is the substance of a rig, so it is never summarised away.
+            // Past the point where it still reads on one line it keeps its original layout instead, and the
+            // caller lifts it out of the node's comment into a statement of its own.
+            return singleLine.Length <= 300 ? singleLine : rendered.TrimEnd();
+        }
+
+        return "default";
+    }
 
     private sealed class ContainerStorage(FRigVMMemoryContainer work, FRigVMMemoryContainer literal) : RigVMStorage
     {
@@ -121,17 +253,84 @@ internal abstract class RigVMStorage
     }
 
     /// <summary>
+    /// UE 5.1+: the register tables are property bags serialized on the VM itself. CUE4Parse reads the bags'
+    /// descriptors but skips their value payload, so names and layout come from the bag while authored literal
+    /// values are recovered by name from the legacy generated class's CDO where it still exists.
+    /// </summary>
+    private sealed class PropertyBagStorage : RigVMStorage
+    {
+        private readonly Dictionary<ERigVMMemoryType, Register[]> _registers;
+        private readonly Dictionary<ERigVMMemoryType, FRigVMPropertyPathDescription[]> _propertyPaths;
+        private readonly Dictionary<string, FPropertyTag> _literalValues;
+
+        private PropertyBagStorage(Dictionary<ERigVMMemoryType, Register[]> registers,
+            Dictionary<ERigVMMemoryType, FRigVMPropertyPathDescription[]> propertyPaths,
+            Dictionary<string, FPropertyTag> literalValues)
+        {
+            _registers = registers;
+            _propertyPaths = propertyPaths;
+            _literalValues = literalValues;
+        }
+
+        public static PropertyBagStorage? TryCreate(UClass uClass, URigVM vm)
+        {
+            var bags = new (ERigVMMemoryType Type, FRigVMMemoryStorageStruct? Bag)[]
+            {
+                (ERigVMMemoryType.Literal, vm.LiteralMemoryStorage),
+                (ERigVMMemoryType.Work, vm.DefaultWorkMemoryStorage),
+                (ERigVMMemoryType.Debug, vm.DefaultDebugMemoryStorage)
+            };
+            if (bags.All(entry => entry.Bag is null or { PropertyDescs.Length: 0 })) return null;
+
+            var unitNames = GetUnitNames(vm);
+            var registers = new Dictionary<ERigVMMemoryType, Register[]>();
+            var propertyPaths = new Dictionary<ERigVMMemoryType, FRigVMPropertyPathDescription[]>();
+            foreach (var (memoryType, bag) in bags)
+            {
+                if (bag is null) continue;
+                registers[memoryType] = bag.PropertyDescs
+                    .Select(desc => new Register(desc.Name.Text, NormalizeName(desc.Name.Text, unitNames), null))
+                    .ToArray();
+                propertyPaths[memoryType] = bag.PropertyPathDescriptions ?? [];
+            }
+
+            // The bag carries its own values; the legacy generated class CDO only fills gaps for builds
+            // where the bag payload could not be read.
+            var literalValues = ReadLiteralCdo(uClass);
+            foreach (var property in vm.LiteralMemoryStorage?.Properties ?? [])
+                literalValues[property.Name.Text] = property;
+
+            return new PropertyBagStorage(registers, propertyPaths, literalValues);
+        }
+
+        private Register? RegisterAt(FRigVMOperand operand) =>
+            _registers.TryGetValue(operand.MemoryType, out var registers) && operand.RegisterIndex < registers.Length
+                ? registers[operand.RegisterIndex]
+                : null;
+
+        public override string? GetRegisterName(FRigVMOperand operand) =>
+            operand.MemoryType == ERigVMMemoryType.External ? GetExternalName(operand) : RegisterAt(operand)?.Name;
+
+        public override string FormatLiteralValue(FRigVMOperand operand, string? pinName)
+        {
+            if (RegisterAt(operand) is not { } register) return "<unresolved>";
+            return _literalValues.TryGetValue(register.RawName, out var property)
+                ? FormatPropertyValue(property, pinName)
+                : "default";
+        }
+
+        protected override string? GetOffsetSuffix(FRigVMOperand operand) =>
+            _propertyPaths.TryGetValue(operand.MemoryType, out var paths) && operand.RegisterOffset < paths.Length
+                ? FormatSegmentPath(paths[operand.RegisterOffset].SegmentPath)
+                : null;
+    }
+
+    /// <summary>
     /// UE 5.0: registers are reflected properties on a generated class per memory type, and the authored
     /// literal values live on that class's CDO.
     /// </summary>
     private sealed class GeneratedClassStorage : RigVMStorage
     {
-        /// <summary>
-        /// A register: the generated property name as stored, that name split into "Node.Pin", and the
-        /// reflected property itself (needed to name the type default when no value was serialized).
-        /// </summary>
-        private readonly record struct Register(string RawName, string Name, FProperty? Property);
-
         private readonly Dictionary<ERigVMMemoryType, Register[]> _registers;
         private readonly Dictionary<string, FPropertyTag> _literalValues;
         private readonly FRigVMPropertyPathDescription[] _workPropertyPaths;
@@ -155,18 +354,7 @@ internal abstract class RigVMStorage
             var generatorClasses = package.GetExports().OfType<URigVMMemoryStorageGeneratorClass>().ToArray();
             if (generatorClasses.Length == 0) return null;
 
-            // The unit type names double as the node-name stems, which is what lets a flattened
-            // "Node_Pin" property name be split back into its node and pin halves. A node keeps the full
-            // struct name ("RigUnit_GetInitialBoneTransform_2_4") unless it was renamed in the editor, in
-            // which case it uses the short name ("MathVectorAdd_2_4_2") - so both spellings are candidates,
-            // longest first so the fuller one wins where they'd both match.
-            var unitNames = (vm.FunctionNamesStorage ?? [])
-                .Select(function => function.Text.SubstringBefore("::").TrimStart('F'))
-                .SelectMany(name => new[] { name, name.SubstringAfter("RigUnit_") })
-                .Where(name => name.Length > 0)
-                .Distinct()
-                .OrderByDescending(name => name.Length)
-                .ToArray();
+            var unitNames = GetUnitNames(vm);
 
             var registers = new Dictionary<ERigVMMemoryType, Register[]>();
             var workPropertyPaths = Array.Empty<FRigVMPropertyPathDescription>();
@@ -181,50 +369,13 @@ internal abstract class RigVMStorage
             }
             if (registers.Count == 0) return null;
 
-            // Only the literal CDO matters: work memory holds runtime state, not authored values.
-            var literalValues = package.GetExports()
-                .FirstOrDefault(export => export.Name.StartsWith("Default__RigVMMemory_Literal", StringComparison.OrdinalIgnoreCase))
-                ?.Properties
-                .GroupBy(property => property.Name.Text)
-                .ToDictionary(group => group.Key, group => group.First()) ?? [];
+            var literalValues = ReadLiteralCdo(uClass);
 
             return new GeneratedClassStorage(registers, literalValues, workPropertyPaths);
         }
 
-        /// <summary>
-        /// Turns a generated property name back into "Node.Pin". The generator flattens the pin path into the
-        /// property name ("GetInitialBoneTransform_0_Space__Const"), so the node half is recovered by matching
-        /// a known unit type name plus its instance suffix.
-        /// </summary>
-        private static string NormalizeName(string propertyName, string[] unitNames)
-        {
-            // "__Const" marks a literal and "__IO" a pin that is both an input and an output; neither is
-            // part of the pin name. Trailing '_' is how the generator escapes an otherwise empty tail.
-            var name = propertyName;
-            foreach (var marker in new[] { "__Const", "__IO" })
-                if (name.EndsWith(marker, StringComparison.Ordinal)) name = name[..^marker.Length];
-            name = name.TrimEnd('_');
-
-            foreach (var unitName in unitNames)
-            {
-                if (!name.StartsWith(unitName, StringComparison.Ordinal)) continue;
-
-                // Consume the instance suffix the compiler appends to disambiguate nodes ("_0", "_1_2", ...).
-                var index = unitName.Length;
-                while (index < name.Length && name[index] == '_' && index + 1 < name.Length && char.IsDigit(name[index + 1]))
-                {
-                    index++;
-                    while (index < name.Length && char.IsDigit(name[index])) index++;
-                }
-
-                if (index < name.Length && name[index] == '_')
-                    return $"{name[..index]}.{name[(index + 1)..]}";
-            }
-
-            return name;
-        }
-
-        public override string? GetRegisterName(FRigVMOperand operand) => RegisterAt(operand)?.Name;
+        public override string? GetRegisterName(FRigVMOperand operand) =>
+            operand.MemoryType == ERigVMMemoryType.External ? GetExternalName(operand) : RegisterAt(operand)?.Name;
 
         public override string FormatLiteralValue(FRigVMOperand operand, string? pinName)
         {
@@ -286,37 +437,6 @@ internal abstract class RigVMStorage
             return suffix.ToString();
         }
 
-        private static string FormatPropertyValue(FPropertyTag property, string? pinName)
-        {
-            var value = property.Tag?.GenericValue;
-            switch (value)
-            {
-                // Byte-backed enums surface as a qualified FName ("EBoneGetterSetterMode::GlobalSpace"),
-                // which is already valid C++ - only genuine name pins want the FName(...) wrapper.
-                case FName enumValue when enumValue.Text.Contains("::"): return enumValue.Text;
-                case FName name: return $"FName(\"{name.Text}\")";
-                case string text: return $"\"{text}\"";
-                case bool flag: return flag ? "true" : "false";
-                case float or double: return Convert.ToString(value, CultureInfo.InvariantCulture) + "f";
-                case byte or sbyte or short or ushort or int or uint or long or ulong: return value.ToString()!;
-            }
-
-            // Structs and arrays (a bone list, a transform, ...) go through the same renderer the class dump
-            // uses, so they read as C++ initialisers rather than an internal type description. These carry
-            // real authored data - the bone a node drives, its offset - so the budget is generous; only a
-            // genuinely unwieldy list collapses, and then to a count rather than nothing.
-            if (property.Tag is not null && BlueprintDecompilerUtils.GetPropertyTagVariable(property, out _, out var rendered) && rendered.Length > 0)
-            {
-                var singleLine = string.Join(' ', rendered.Split('\n').Select(line => line.Trim()));
-                if (singleLine.Length <= 300) return singleLine;
-
-                // Still a valid initialiser, just an empty one carrying the count in a comment.
-                var elementCount = (property.Tag.GenericValue as UScriptArray)?.Properties.Count;
-                return elementCount is { } count ? $"{{ /* {count} elements */ }}" : "{ /* ... */ }";
-            }
-
-            return "default";
-        }
     }
 
     protected static string FormatPlainBytes(byte[] bytes, string? pinName)

@@ -2178,6 +2178,9 @@ public static class BlueprintDecompilerUtils
         stringBuilder.AppendLine("// the pin wiring, and plain assignments are the VM's explicit copy instructions. Authored constants");
         stringBuilder.AppendLine("// (from literal memory) are shown on each node's comment line - the compiler dedupes identical");
         stringBuilder.AppendLine("// constants across nodes, so a label may carry the name of the first pin that used the value.");
+        stringBuilder.AppendLine("// Execute() arguments are the instruction's operands in the unit's own pin order (the shared");
+        stringBuilder.AppendLine("// ExecuteContext is omitted): a bare name is one of this node's pins, anything else is the value");
+        stringBuilder.AppendLine("// wired into that position. E.g. RigVMDispatch_If takes (Condition, True, False, Result).");
         stringBuilder.AppendLine("void Execute()");
         stringBuilder.OpenBlock();
 
@@ -2197,7 +2200,13 @@ public static class BlueprintDecompilerUtils
                         ? functionNames[executeOp.FunctionIndex].Text
                         : $"UnknownFunction_{executeOp.FunctionIndex}";
                     var unitType = functionName.SubstringBefore("::").TrimStart('F');
-                    var unitShortName = unitType.SubstringAfter("RigUnit_");
+                    // The node-name stem drops the family prefix: a "DISPATCH_RigVMDispatch_If" instruction
+                    // belongs to a node the editor simply calls "If".
+                    var unitShortName = unitType
+                        .SubstringAfter("RigUnit_")
+                        .SubstringAfter("RigVMFunction_")
+                        .SubstringAfter("DISPATCH_RigVMDispatch_")
+                        .SubstringAfter("RigVMDispatch_");
 
                     // The node instance name is the "<Node>." prefix of the arguments' register names, restricted
                     // to prefixes whose stem matches this instruction's unit type (arguments referencing another
@@ -2219,8 +2228,9 @@ public static class BlueprintDecompilerUtils
                     }
                     nodeName = freshPrefixes.FirstOrDefault() ?? allPrefixes.FirstOrDefault() ?? $"{unitShortName}_{step}";
 
-                    var literalParts = new List<string>();
-                    var callArguments = new List<string>();
+                    var bulkLiterals = new List<string>();
+                    // Each operand as it will be written, paired with the pin it feeds where that is knowable.
+                    var callArguments = new List<(string Text, string? Pin)>();
                     foreach (var argument in executeOp.Arguments)
                     {
                         var registerName = storage.GetRegisterName(argument);
@@ -2230,14 +2240,36 @@ public static class BlueprintDecompilerUtils
                         if (argument.MemoryType == ERigVMMemoryType.Literal)
                         {
                             var pin = registerName.Contains('.') ? registerName.SubstringAfter('.') : registerName;
-                            var part = $"{pin} = {storage.FormatLiteralValue(argument, pin)}";
-                            // Distinct registers can dedupe to the same pin label + value; show it once.
-                            if (!literalParts.Contains(part)) literalParts.Add(part);
+                            var literalValue = storage.FormatLiteralValue(argument, pin);
+
+                            // The compiler shares one register between every pin holding the same constant, so
+                            // its name may belong to an unrelated node and is only trustworthy for this node's own.
+                            var ownPin = !registerName.Contains('.') || registerName.StartsWith(nodeName + '.', StringComparison.Ordinal)
+                                ? pin
+                                : null;
+
+                            // A value too large to sit in the argument list (a bone list, say) becomes a real
+                            // assignment above the call, so nothing is summarised out of the graph.
+                            if (literalValue.Contains('\n'))
+                            {
+                                var assignment = $"{nodeName}.{pin} = {literalValue};";
+                                if (!bulkLiterals.Contains(assignment)) bulkLiterals.Add(assignment);
+                                callArguments.Add((pin, ownPin));
+                                continue;
+                            }
+
+                            callArguments.Add((literalValue, ownPin));
                         }
-                        else if (!registerName.StartsWith(nodeName + '.', StringComparison.Ordinal))
+                        else if (registerName.StartsWith(nodeName + '.', StringComparison.Ordinal))
+                        {
+                            // One of this node's own pins - name it, so its position in the call is readable.
+                            var pin = registerName.SubstringAfter('.');
+                            callArguments.Add((pin, pin));
+                        }
+                        else
                         {
                             // A foreign node's register used directly as an argument = a wire into this node.
-                            callArguments.Add(FormatOperand(argument));
+                            callArguments.Add((FormatOperand(argument), null));
                         }
                     }
 
@@ -2246,10 +2278,9 @@ public static class BlueprintDecompilerUtils
 
                     if (suppressedProperties.Add(nodeName)) declarationOrder.Add(nodeName);
 
-                    var comment = $"// [{step}] {nodeName} ({unitType})";
-                    if (literalParts.Count > 0) comment += $": {string.Join(", ", literalParts)}";
-                    stringBuilder.AppendLine(comment);
-                    stringBuilder.AppendLine($"{nodeName}.Execute({string.Join(", ", callArguments)});");
+                    stringBuilder.AppendLine($"// [{step}] {nodeName} ({unitType})");
+                    foreach (var assignment in bulkLiterals) stringBuilder.AppendLine(assignment);
+                    AppendCall(stringBuilder, nodeName, callArguments);
                     stringBuilder.AppendLine();
                     step++;
                     break;
@@ -2297,6 +2328,18 @@ public static class BlueprintDecompilerUtils
                 case FRigVMBaseOp baseOp:
                     stringBuilder.AppendLine($"// {baseOp.OpCode}");
                     break;
+                case FRigVMRunInstructionsOp runOp:
+                    stringBuilder.AppendLine($"// RunInstructions {runOp.StartInstruction}..{runOp.EndInstruction} over {FormatOperand(runOp.Arg)}");
+                    break;
+                case FRigVMJumpToBranchOp branchOp:
+                    stringBuilder.AppendLine($"// JumpToBranch on {FormatOperand(branchOp.Arg)} (branch table from {branchOp.FirstBranchInfoIndex})");
+                    break;
+                case FRigVMTernaryOp ternaryOp:
+                    stringBuilder.AppendLine($"// {ternaryOp.OpCode}({FormatOperand(ternaryOp.ArgA)}, {FormatOperand(ternaryOp.ArgB)}, {FormatOperand(ternaryOp.ArgC)})");
+                    break;
+                case FRigVMBinaryOp binaryOp:
+                    stringBuilder.AppendLine($"// {binaryOp.OpCode}({FormatOperand(binaryOp.ArgA)}, {FormatOperand(binaryOp.ArgB)})");
+                    break;
                 default:
                     stringBuilder.AppendLine($"// <{byteCode.Instructions[index].GetType().Name}>");
                     break;
@@ -2305,5 +2348,40 @@ public static class BlueprintDecompilerUtils
 
         stringBuilder.CloseBlock();
         return stringBuilder.ToString();
+    }
+
+    /// <summary>
+    /// Writes a rig unit call, breaking it over several lines once it stops being readable on one. Each
+    /// argument then gets its own line tagged with the pin it feeds, which is the only place that mapping is
+    /// recorded - the bytecode itself only carries position.
+    /// </summary>
+    private static void AppendCall(CustomStringBuilder stringBuilder, string nodeName, List<(string Text, string? Pin)> arguments)
+    {
+        const int singleLineBudget = 110;
+
+        var singleLine = $"{nodeName}.Execute({string.Join(", ", arguments.Select(argument => argument.Text))});";
+        if (arguments.Count <= 1 || singleLine.Length <= singleLineBudget)
+        {
+            stringBuilder.AppendLine(singleLine);
+            return;
+        }
+
+        stringBuilder.AppendLine($"{nodeName}.Execute(");
+        stringBuilder.IncreaseIndentation();
+        var labelled = new HashSet<string>();
+        for (var i = 0; i < arguments.Count; i++)
+        {
+            var (text, pin) = arguments[i];
+            var separator = i < arguments.Count - 1 ? "," : "";
+
+            // Drop the label when it says nothing the argument doesn't, and when it has already been used:
+            // a constant shared between two pins carries only the first one's name, so repeating it here
+            // would attribute the value to the wrong pin.
+            if (pin is not null && (pin == text || !labelled.Add(pin))) pin = null;
+
+            stringBuilder.AppendLine(pin is null ? $"{text}{separator}" : $"{text}{separator} // {pin}");
+        }
+        stringBuilder.DecreaseIndentation();
+        stringBuilder.AppendLine(");");
     }
 }

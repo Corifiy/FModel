@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using CUE4Parse.MappingsProvider;
+using CUE4Parse.UE4.Assets.Objects;
+using Serilog;
 using CUE4Parse.UE4.Assets.Readers;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.UObject;
@@ -43,6 +48,7 @@ public class FInstancedPropertyBag : IUStruct
 {
     public FPropertyBagPropertyDesc[] PropertyDescs = [];
     public int SerialSize;
+    public List<FPropertyTag> Properties = [];
 
     public FInstancedPropertyBag(FAssetArchive Ar)
     {
@@ -67,12 +73,75 @@ public class FInstancedPropertyBag : IUStruct
         if (Version >= EVersion.SerializeStructSize)
             SerialSize = Ar.Read<int>();
 
-        // TODO implement
-        // BagStruct = const_cast<UPropertyBag*>(UPropertyBag::GetOrCreateFromDescs(PropertyDescs));
-        // and then read as FStructFallback
+        // The bag's UScriptStruct isn't serialized - the engine rebuilds it from the descriptors
+        // (UPropertyBag::GetOrCreateFromDescs) and then serializes the value against it, so the schema for the
+        // payload is the descriptor list itself, in order.
+        var payloadStart = Ar.Position;
+        try
+        {
+            if (Ar.HasUnversionedProperties)
+                Assets.Exports.UObject.DeserializePropertiesUnversioned(Properties, Ar, BuildSchema(Ar), nameof(FInstancedPropertyBag));
+            else
+                Assets.Exports.UObject.DeserializePropertiesTagged(Properties, Ar, false);
+        }
+        catch (Exception e)
+        {
+            // A descriptor referencing a struct/enum this build can't resolve makes the payload unreadable.
+            // SerialSize exists precisely so the rest of the archive survives that, so skip and carry on.
+            Properties.Clear();
+            Log.Warning(e, "Failed to read FInstancedPropertyBag values, skipping {Size} bytes", SerialSize);
+        }
 
-        Ar.Position += SerialSize;
+        if (SerialSize > 0) Ar.Position = payloadStart + SerialSize;
     }
+
+    /// <summary>
+    /// Turns the descriptors into a property schema the unversioned reader can drive, mapping each bag type
+    /// onto the equivalent reflected property.
+    /// </summary>
+    private Struct BuildSchema(FAssetArchive Ar)
+    {
+        var properties = new Dictionary<int, PropertyInfo>();
+        for (var i = 0; i < PropertyDescs.Length; i++)
+        {
+            var desc = PropertyDescs[i];
+            var propertyType = BuildPropertyType(desc.ValueType, desc.ValueTypeObject);
+
+            // Containers wrap the value type, outermost last, so they are applied in reverse. Older versions
+            // stored a single container in ContainerType; newer ones use the ContainerTypes list.
+            var containers = desc.ContainerTypes.Types ?? (desc.ContainerType != EPropertyBagContainerType.None ? [desc.ContainerType] : []);
+            for (var c = containers.Length - 1; c >= 0; c--)
+            {
+                if (containers[c] == EPropertyBagContainerType.Array)
+                    propertyType = new PropertyType("ArrayProperty", innerType: propertyType);
+            }
+
+            properties[i] = new PropertyInfo(0, desc.Name.Text, propertyType, 1);
+        }
+
+        return new Struct(Ar.Owner?.Mappings, nameof(FInstancedPropertyBag), null, properties, PropertyDescs.Length);
+    }
+
+    private static PropertyType BuildPropertyType(EPropertyBagPropertyType valueType, FPackageIndex? valueTypeObject) => valueType switch
+    {
+        EPropertyBagPropertyType.Bool => new PropertyType("BoolProperty", b: false),
+        EPropertyBagPropertyType.Byte => new PropertyType("ByteProperty"),
+        EPropertyBagPropertyType.Int32 => new PropertyType("IntProperty"),
+        EPropertyBagPropertyType.Int64 => new PropertyType("Int64Property"),
+        EPropertyBagPropertyType.UInt32 => new PropertyType("UInt32Property"),
+        EPropertyBagPropertyType.UInt64 => new PropertyType("UInt64Property"),
+        EPropertyBagPropertyType.Float => new PropertyType("FloatProperty"),
+        EPropertyBagPropertyType.Double => new PropertyType("DoubleProperty"),
+        EPropertyBagPropertyType.Name => new PropertyType("NameProperty"),
+        EPropertyBagPropertyType.String => new PropertyType("StrProperty"),
+        EPropertyBagPropertyType.Text => new PropertyType("TextProperty"),
+        EPropertyBagPropertyType.Enum => new PropertyType("EnumProperty", enumName: valueTypeObject?.Name),
+        EPropertyBagPropertyType.Struct => new PropertyType("StructProperty", valueTypeObject?.Name),
+        EPropertyBagPropertyType.Object or EPropertyBagPropertyType.Class => new PropertyType("ObjectProperty"),
+        EPropertyBagPropertyType.SoftObject => new PropertyType("SoftObjectProperty"),
+        EPropertyBagPropertyType.SoftClass => new PropertyType("SoftClassProperty"),
+        _ => new PropertyType("NoneProperty")
+    };
 
     public enum EVersion : byte
     {

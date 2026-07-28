@@ -127,19 +127,32 @@ public class UClass : UStruct
         // functions. When present, the raw property dump below would otherwise repeat every RigUnit node's
         // full baked transform state (and the entire skeleton pose via "Hierarchy") in addition to the
         // already-decompiled graph, so those are collapsed to bare declarations.
-        var controlRigOperators = BlueprintDecompilerUtils.DecompileControlRigOperators(this, classDefaultObject, out var controlRigNodeNames, out var controlRigDeclarationOrder);
-        var controlRigSuppressedProperties = controlRigOperators != null
+        var decompiledGraph = BlueprintDecompilerUtils.DecompileControlRigOperators(this, classDefaultObject, out var controlRigNodeNames, out var graphDeclarationOrder);
+        var graphSuppressedProperties = decompiledGraph != null
             ? new HashSet<string>(controlRigNodeNames) { "Operators", "Hierarchy" }
             : [];
 
         // RigVM era (UE 4.25+): the graph lives in bytecode on the class's VM instead of an Operators stream.
-        if (controlRigOperators == null)
+        if (decompiledGraph == null)
         {
-            controlRigOperators = BlueprintDecompilerUtils.DecompileRigVMByteCode(this, out var rigVMSuppressedProperties, out var rigVMDeclarationOrder);
-            if (controlRigOperators != null)
+            decompiledGraph = BlueprintDecompilerUtils.DecompileRigVMByteCode(this, out var rigVMSuppressedProperties, out var rigVMDeclarationOrder);
+            if (decompiledGraph != null)
             {
-                controlRigSuppressedProperties = rigVMSuppressedProperties;
-                controlRigDeclarationOrder = rigVMDeclarationOrder;
+                graphSuppressedProperties = rigVMSuppressedProperties;
+                graphDeclarationOrder = rigVMDeclarationOrder;
+            }
+        }
+
+        // UE 5 anim blueprints have the same problem for a different reason: the compiler folds every pin value
+        // off the node structs into flat class tables, so the raw dump shows anim nodes carrying nothing but
+        // their pose links. AnimGraphStorage puts the inputs back on the nodes they belong to.
+        if (decompiledGraph == null)
+        {
+            decompiledGraph = AnimGraphStorage.Decompile(this, classDefaultObject, out var animSuppressedProperties, out var animDeclarationOrder);
+            if (decompiledGraph != null)
+            {
+                graphSuppressedProperties = animSuppressedProperties;
+                graphDeclarationOrder = animDeclarationOrder;
             }
         }
 
@@ -153,7 +166,7 @@ public class UClass : UStruct
             if (!distinct.Add(property.Name.Text)) continue;
             propertyOrder.Add(property.Name.Text);
 
-            if (controlRigSuppressedProperties.Contains(property.Name.Text))
+            if (graphSuppressedProperties.Contains(property.Name.Text))
             {
                 BlueprintDecompilerUtils.GetPropertyTagVariable(property, out var suppressedType, out _);
                 var reason = property.Name.Text switch
@@ -161,7 +174,8 @@ public class UClass : UStruct
                     "Operators" or "VM" => "see decompiled ControlRig graph below",
                     "Hierarchy" or "HierarchyContainer" => "skeleton bind pose omitted for brevity",
                     "DrawContainer" => "editor draw instructions omitted for brevity",
-                    _ => "wiring shown in decompiled ControlRig graph below"
+                    "AnimNodeData" or "NodeTypeMap" => "folded pin values resolved in the decompiled AnimGraph below",
+                    _ => "wiring shown in the decompiled graph below"
                 };
                 declarationByProperty[property.Name.Text] = ($"{suppressedType} {property.Name.Text}; // {reason}", EAccessMode.Public);
                 continue;
@@ -183,14 +197,14 @@ public class UClass : UStruct
             declarationByProperty[property.Name.Text] = ($"{variableType} {property.Name.Text}{value};", property.GetAccessMode());
         }
 
-        // For ControlRig classes, declare graph-related properties in first-use order (matching the
-        // decompiled graph below) instead of whatever order they happened to serialize in on the CDO.
+        // For classes with a decompiled graph, declare graph-related properties in first-use order (matching the
+        // graph below) instead of whatever order they happened to serialize in on the CDO.
         var finalPropertyOrder = propertyOrder;
-        if (controlRigDeclarationOrder.Count > 0)
+        if (graphDeclarationOrder.Count > 0)
         {
             finalPropertyOrder = [];
             var orderedSeen = new HashSet<string>();
-            foreach (var name in controlRigDeclarationOrder)
+            foreach (var name in graphDeclarationOrder)
                 if (declarationByProperty.ContainsKey(name) && orderedSeen.Add(name)) finalPropertyOrder.Add(name);
             foreach (var name in propertyOrder)
                 if (orderedSeen.Add(name)) finalPropertyOrder.Add(name);
@@ -215,10 +229,10 @@ public class UClass : UStruct
             }
         }
 
-        if (controlRigOperators != null)
+        if (decompiledGraph != null)
         {
             stringBuilder.AppendLine();
-            stringBuilder.AppendLine(controlRigOperators);
+            stringBuilder.AppendLine(decompiledGraph);
         }
 
         var totalFuncMapCount = FuncMap.Count;

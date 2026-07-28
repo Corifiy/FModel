@@ -5,9 +5,9 @@ using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
 using CUE4Parse.MappingsProvider.Usmap;
 using CUE4Parse.UE4.Objects.Core.Misc;
-using CUE4Parse.UE4.Objects.RigVM;
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Versions;
+using Newtonsoft.Json;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 
@@ -18,24 +18,40 @@ namespace CUE4Parse.Example
         public static void Main()
         {
             Log.Logger = new LoggerConfiguration().WriteTo.Console(theme: AnsiConsoleTheme.Literate).CreateLogger();
-            var provider = new DefaultFileProvider(@"V:\.builds\19.01\FortniteGame\Content\Paks", SearchOption.TopDirectoryOnly, true, new VersionContainer(EGame.GAME_UE5_0));
-            provider.MappingsContainer = new FileUsmapTypeMappingsProvider(@"C:\Users\admin\AppData\Roaming\Core\.installation\.mappings\.github\19.01\++Fortnite+Release-19.01-CL-18489740-Windows_oo.usmap");
+            var provider = new DefaultFileProvider(@"V:\.builds\31.40\FortniteGame\Content\Paks", SearchOption.TopDirectoryOnly, true, new VersionContainer(EGame.GAME_UE5_5));
+            provider.MappingsContainer = new FileUsmapTypeMappingsProvider(@"C:\Users\admin\AppData\Roaming\Core\.installation\.mappings\.github\31.40\++Fortnite+Release-31.40-CL-36874825-Windows_oo.usmap");
             provider.Initialize();
-            provider.SubmitKey(new FGuid(), new FAesKey("0xDAE1418B289573D4148C72F3C76ABC7E2DB9CAA618A3EAF2D8580EB3A1BB7A63"));
+            provider.SubmitKey(new FGuid(), new FAesKey("0x6B80868E9345C839D8B10CE00179763E15E5FDA976E499D6CFBEDB41AC0FAD36"));
 
-            var pkg = provider.LoadPackage("FortniteGame/Content/Characters/Player/Male/Medium/Bodies/M_MED_Werewolf_01/Meshes/M_MED_Werewolf_ControlRig");
+            const string path = "FortniteGame/Plugins/GameFeatures/BRCosmetics/Content/Characters/Player/Female/Medium/Bodies/F_MED_Lilac/Meshes/Parts/F_MED_Lilac_FaceAcc_AnimBP";
+            var pkg = provider.LoadPackage(path);
 
-            // Exactly what FModel does: decompile every UClass export, in export order.
+            var outDir = @"C:\Users\admin\AppData\Local\Temp\claude\D--build-FModel-FModel\86b7bc31-1601-4f28-8cc6-82f597621d75\scratchpad";
+            Directory.CreateDirectory(outDir);
+
+            using var sw = new StreamWriter(Path.Combine(outDir, "animbp_dump.txt"));
             foreach (var export in pkg.GetExports())
             {
-                if (export is not UClass cls) continue;
-                Console.WriteLine($"--- {cls.Name} (C#={cls.GetType().Name}) ---");
-                if (cls is URigVMBlueprintGeneratedClass rigClass)
-                    Console.WriteLine($"    VM null? {rigClass.VM == null}; instr={rigClass.VM?.ByteCodeStorage?.Instructions.Count ?? -1}; funcs={rigClass.VM?.FunctionNamesStorage?.Length ?? -1}");
-                Console.WriteLine($"    Owner null? {cls.Owner == null}");
-                var text = cls.DecompileBlueprintToPseudo(pkg.Mappings);
-                Console.WriteLine($"    decompiled {text.Length} chars, graph={text.Contains("Decompiled ControlRig graph")}");
+                sw.WriteLine($"===== EXPORT {export.Name} : {export.ExportType} (C#={export.GetType().Name}) =====");
+                if (export is UStruct st)
+                {
+                    sw.WriteLine($"  Super={st.SuperStruct?.Name}");
+                    sw.WriteLine($"  ChildProperties: {st.ChildProperties?.Length ?? 0}");
+                    foreach (var cp in st.ChildProperties ?? [])
+                        sw.WriteLine($"    - {cp.Name} : {cp.GetType().Name}");
+                }
+                if (export is UClass cls)
+                {
+                    sw.WriteLine($"  FuncMap: {cls.FuncMap.Count}");
+                    foreach (var kv in cls.FuncMap) sw.WriteLine($"    fn {kv.Key} -> {kv.Value.Name}");
+                }
             }
+
+            sw.WriteLine();
+            sw.WriteLine("################ JSON ################");
+            sw.WriteLine(JsonConvert.SerializeObject(pkg.GetExports(), Formatting.Indented));
+            sw.Flush();
+            Console.WriteLine("done");
         }
     }
 }
