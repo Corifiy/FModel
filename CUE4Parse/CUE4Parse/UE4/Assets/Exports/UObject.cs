@@ -400,6 +400,19 @@ public class UObject : AbstractPropertyHolder
         }
     }
 
+    /// <summary>
+    /// Whether <see cref="WriteReconstructedProperties"/> has anything to write, so the "Properties" object is
+    /// still opened for an export that serialised none of its own.
+    /// </summary>
+    protected internal virtual bool HasReconstructedProperties => false;
+
+    /// <summary>
+    /// Hook for properties an export no longer serialises but can be rebuilt from what it does. These belong in
+    /// the same "Properties" object as the real ones - that is where the engine version that still had them put
+    /// them, and it is where anything reading these dumps looks.
+    /// </summary>
+    protected internal virtual void WriteReconstructedProperties(JsonWriter writer, JsonSerializer serializer) { }
+
     protected internal virtual void WriteJson(JsonWriter writer, JsonSerializer serializer)
     {
         writer.WritePropertyName("Type");
@@ -440,7 +453,7 @@ public class UObject : AbstractPropertyHolder
             serializer.Serialize(writer, Template);
         }
 
-        if (Properties.Count > 0)
+        if (Properties.Count > 0 || HasReconstructedProperties)
         {
             writer.WritePropertyName(nameof(Properties));
             writer.WriteStartObject();
@@ -449,6 +462,7 @@ public class UObject : AbstractPropertyHolder
                 writer.WritePropertyName(property.ArrayIndex > 0 ? $"{property.Name.Text}[{property.ArrayIndex}]" : property.Name.Text);
                 serializer.Serialize(writer, property.Tag);
             }
+            WriteReconstructedProperties(writer, serializer);
             writer.WriteEndObject();
         }
 

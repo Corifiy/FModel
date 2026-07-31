@@ -42,17 +42,25 @@ public class FMemoryImageArchive : FArchive
     public readonly FArchive InnerArchive;
     public IReadOnlyDictionary<int, (FName, bool)>? Names;
     public FPointerTableBase? PointerTable;
+    /// <summary>
+    /// Whether this image was frozen after the RDG uniform buffer rework - see
+    /// FShaderMapBase.DeserializeContent, which detects it for the 4.26-era branches that predate it.
+    /// Defaults to the "ShaderMap.HasRDGUniformBuffers" option.
+    /// </summary>
+    public bool bHasRDGUniformBuffers;
     private readonly int ArrayAlign = 4;
 
     public FMemoryImageArchive(FArchive Ar) : base(Ar.Versions)
     {
         InnerArchive = Ar;
+        bHasRDGUniformBuffers = Versions["ShaderMap.HasRDGUniformBuffers"];
     }
 
     public FMemoryImageArchive(FArchive Ar, int arrayAlign) : base(Ar.Versions)
     {
         InnerArchive = Ar;
         ArrayAlign = arrayAlign;
+        bHasRDGUniformBuffers = Versions["ShaderMap.HasRDGUniformBuffers"];
     }
 
     public override int Read(byte[] buffer, int offset, int count)

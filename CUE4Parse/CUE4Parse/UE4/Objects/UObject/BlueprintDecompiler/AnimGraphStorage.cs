@@ -53,7 +53,7 @@ public sealed class AnimGraphStorage
     private readonly record struct Copy(string Source, string[] Destinations, string CopyType);
 
     /// <summary>What drives one node property, once the folding has been undone.</summary>
-    private readonly record struct Binding(string Source, string CopyType, bool Negated, bool OnlyWhenActive, int CopyIndex);
+    private readonly record struct Binding(string Source, string CopyType, bool Negated, bool OnlyWhenActive, int CopyIndex, FName PostCopyOperation);
 
     private readonly record struct Node(string Name, string StructName);
 
@@ -76,6 +76,32 @@ public sealed class AnimGraphStorage
     private readonly Dictionary<string, Binding> _bindingsByDestination = [];
     private readonly HashSet<string> _emittedDestinations = [];
 
+    /// <summary>Node property name to the bytecode handler it binds, for the nodes that still use one.</summary>
+    private readonly Dictionary<string, (FName BoundFunction, FPackageIndex? Function)> _handlerFunctions = [];
+
+    /// <summary>Node property name to the library copies its handler runs, in the order the handler lists them.</summary>
+    private readonly Dictionary<string, List<int>> _copyIndicesByNode = [];
+
+    /// <summary>
+    /// One node's dynamically driven pins, shaped after the UE 4 <c>FExposedValueHandler</c> that used to sit on
+    /// the class. <see cref="NodeIndex"/> is the AnimNodeProperties index that pose link IDs refer to.
+    /// </summary>
+    public sealed record ExposedValueHandler(int NodeIndex, string NodeName, string NodeStructName, FName BoundFunction, FPackageIndex? Function, IReadOnlyList<ExposedValueCopyRecord> CopyRecords);
+
+    /// <summary>
+    /// One driven pin. <see cref="SourcePropertyName"/>/<see cref="SourceSubPropertyName"/> split the library's
+    /// source path the way UE 4 did, and <see cref="ViaMutable"/> names the mutable slot the copy physically
+    /// writes when the pin was folded - the copy never mentions the pin itself in that case.
+    /// </summary>
+    public sealed record ExposedValueCopyRecord(string SourcePropertyName, string SourceSubPropertyName, int SourceArrayIndex, string DestPropertyName, string DestStructName, string DestPropertyType, FName PostCopyOperation, bool OnlyUpdateWhenActive, string CopyType, int CopyIndex, string? ViaMutable);
+
+    /// <summary>Builds the resolver, or null when this isn't a UE 5 folded anim class.</summary>
+    public static AnimGraphStorage? Create(UClass uClass, Assets.Exports.UObject? classDefaultObject)
+    {
+        var storage = new AnimGraphStorage();
+        return storage.TryInitialize(uClass, classDefaultObject) ? storage : null;
+    }
+
     /// <summary>
     /// Rebuilds the anim graph as pseudo-code, or null when this isn't a UE 5 folded anim class. Properties
     /// whose contents the graph reproduces in full are reported through <paramref name="suppressedProperties"/>
@@ -86,8 +112,7 @@ public sealed class AnimGraphStorage
         suppressedProperties = [];
         declarationOrder = [];
 
-        var storage = new AnimGraphStorage();
-        if (!storage.TryInitialize(uClass, classDefaultObject)) return null;
+        if (Create(uClass, classDefaultObject) is not { } storage) return null;
 
         var text = storage.Emit();
         if (text is null) return null;
@@ -220,7 +245,7 @@ public sealed class AnimGraphStorage
         // up against its destination rather than being silently replaced by the stale CDO default.
         for (var copyIndex = 0; copyIndex < _copies.Length; copyIndex++)
             foreach (var destination in _copies[copyIndex].Destinations)
-                _bindingsByDestination.TryAdd(destination, new Binding(_copies[copyIndex].Source, _copies[copyIndex].CopyType, false, false, copyIndex));
+                _bindingsByDestination.TryAdd(destination, new Binding(_copies[copyIndex].Source, _copies[copyIndex].CopyType, false, false, copyIndex, new FName("EPostCopyOperation::None")));
     }
 
     /// <summary>
@@ -237,19 +262,158 @@ public sealed class AnimGraphStorage
             var handler = _constantData.GetOrDefault<FStructFallback?>(node.Name, null);
             if (handler is null) continue;
 
+            // The bytecode path from UE 4 never went away - a pin the compiler couldn't turn into a copy still
+            // binds an EvaluateGraphExposedInputs_* function - so it has to be carried alongside the copies.
+            var boundFunction = handler.GetOrDefault("BoundFunction", new FName("None"));
+            var function = handler.GetOrDefault<FPackageIndex?>("Function", null);
+            if (!boundFunction.IsNone || function is { IsNull: false })
+                _handlerFunctions[node.Name] = (boundFunction, function);
+
             foreach (var record in handler.GetOrDefault<FStructFallback[]>("CopyRecords", []))
             {
                 var copyIndex = record.GetOrDefault("CopyIndex", -1);
                 if (copyIndex < 0 || copyIndex >= _copies.Length) continue;
 
+                if (!_copyIndicesByNode.TryGetValue(node.Name, out var owned))
+                    _copyIndicesByNode[node.Name] = owned = [];
+                owned.Add(copyIndex);
+
                 var copy = _copies[copyIndex];
-                var negated = record.GetOrDefault("PostCopyOperation", new FName()).Text.EndsWith("LogicalNegateBool", StringComparison.Ordinal);
-                var binding = new Binding(copy.Source, copy.CopyType, negated, record.GetOrDefault("bOnlyUpdateWhenActive", false), copyIndex);
+                var postCopy = record.GetOrDefault("PostCopyOperation", new FName("EPostCopyOperation::None"));
+                var binding = new Binding(copy.Source, copy.CopyType, postCopy.Text.EndsWith("LogicalNegateBool", StringComparison.Ordinal),
+                    record.GetOrDefault("bOnlyUpdateWhenActive", false), copyIndex, postCopy);
 
                 foreach (var destination in copy.Destinations)
                     _bindingsByDestination[destination] = binding;
             }
         }
+    }
+
+    /// <summary>
+    /// The reflected type of a driven pin, for spelling its destination the way the engine would
+    /// ("BoolProperty'AnimNode_BlendListByBool:bActiveValue'").
+    ///
+    /// A pin still on the node struct is in the mappings, so its own serialised tag names the type outright. A
+    /// folded pin is editor-only and in no mappings at all, but the mutable slot it was folded into is a real
+    /// property of the same type. Only when neither exists does the copy type have to stand in for it.
+    /// </summary>
+    private string DestPropertyType(Node node, string propertyName, string? viaMutable, string copyType)
+    {
+        if (viaMutable is null)
+        {
+            var tag = _classDefaultObject?.GetOrDefault<FStructFallback?>(node.Name, null)
+                ?.Properties.FirstOrDefault(property => property.Name.Text == propertyName);
+            if (tag is not null && tag.PropertyType.Text is { Length: > 0 } tagType) return tagType;
+        }
+        else
+        {
+            var index = Array.IndexOf(_mutableNames, viaMutable);
+            if (index >= 0 && index < _mutableProperties.Length && _mutableProperties[index] is { } property)
+                return property.GetType().Name[1..];
+        }
+
+        return PropertyTypeForCopy(copyType);
+    }
+
+    /// <summary>Last resort: what EPropertyAccessCopyType implies about the destination's type.</summary>
+    private static string PropertyTypeForCopy(string copyType) => copyType switch
+    {
+        "Bool" or "PromoteBoolToByte" or "PromoteBoolToInt32" or "PromoteBoolToInt64" or "PromoteBoolToFloat" or "PromoteBoolToDouble" => "BoolProperty",
+        "Object" => "ObjectProperty",
+        "Struct" => "StructProperty",
+        "Name" => "NameProperty",
+        "Array" or "PromoteArrayFloatToDouble" or "DemoteArrayDoubleToFloat" => "ArrayProperty",
+        "DemoteDoubleToFloat" or "PromoteInt32ToFloat" or "PromoteByteToFloat" => "FloatProperty",
+        "PromoteFloatToDouble" or "PromoteInt32ToDouble" or "PromoteByteToDouble" => "DoubleProperty",
+        "PromoteByteToInt32" or "PromoteInt32ToInt64" or "PromoteByteToInt64" => "IntProperty",
+        _ => "Property"
+    };
+
+    /// <summary>
+    /// Where in the property access library a pin's value would be written, or null when nothing can write it.
+    /// A pin left on the node struct is targeted directly; a folded pin is targeted through its mutable slot,
+    /// since that is the only name the copy knows. Constants have no runtime writer at all.
+    /// </summary>
+    private (string Destination, string? ViaMutable)? DestinationFor(Node node, string propertyName, uint entry)
+    {
+        if (entry == InvalidEntry) return ($"{node.Name}.{propertyName}", null);
+        if ((entry & InstanceDataFlag) == 0) return null;
+
+        var index = (int) (entry & InstanceDataMask);
+        var mutableName = index < _mutableNames.Length ? _mutableNames[index] : null;
+        return mutableName is null ? null : ($"{_mutablePropertyName}.{mutableName}", mutableName);
+    }
+
+    /// <summary>
+    /// The graph's dynamic inputs in the shape UE 4 published them in, one entry per node that has any, with
+    /// every copy resolved back to the pin it ends up in rather than the mutable slot it physically writes.
+    /// </summary>
+    public List<ExposedValueHandler> BuildExposedValueHandlers()
+    {
+        var handlers = new List<ExposedValueHandler>();
+
+        for (var nodeIndex = 0; nodeIndex < _nodes.Count; nodeIndex++)
+        {
+            var node = _nodes[nodeIndex];
+            var entries = nodeIndex < _animNodeData.Length ? _animNodeData[nodeIndex].GetOrDefault<uint[]>("Entries", []) : [];
+            var propertyNames = _propertyNamesByNodeStruct.GetValueOrDefault(node.StructName, []);
+
+            var records = new List<ExposedValueCopyRecord>();
+            for (var propertyIndex = 0; propertyIndex < entries.Length && propertyIndex < propertyNames.Length; propertyIndex++)
+            {
+                var propertyName = propertyNames[propertyIndex];
+                if (string.IsNullOrEmpty(propertyName)) continue;
+
+                if (DestinationFor(node, propertyName, entries[propertyIndex]) is not { } target) continue;
+                if (!_bindingsByDestination.TryGetValue(target.Destination, out var binding)) continue;
+
+                // UE 4 split a source path into exactly two halves ("SkydivingState" + "SkydiveAimYaw"); the
+                // library allows deeper paths, so anything past the first segment stays joined in the tail.
+                var separator = binding.Source.IndexOf('.');
+                var head = separator < 0 ? binding.Source : binding.Source[..separator];
+                var tail = separator < 0 ? "None" : binding.Source[(separator + 1)..];
+
+                records.Add(new ExposedValueCopyRecord(head, tail, 0, propertyName, node.StructName,
+                    DestPropertyType(node, propertyName, target.ViaMutable, binding.CopyType),
+                    binding.PostCopyOperation, binding.OnlyWhenActive, binding.CopyType, binding.CopyIndex, target.ViaMutable));
+            }
+
+            // Copies the node's handler runs that don't land on one of its own pins. A Control Rig or linked
+            // layer node feeds class-level "__CustomProperty_..." slots that the sub-graph reads, so the pin
+            // walk above never sees them, but they are still that node's inputs and drop out entirely otherwise.
+            var resolved = records.Select(record => record.CopyIndex).ToHashSet();
+            foreach (var copyIndex in _copyIndicesByNode.GetValueOrDefault(node.Name, []))
+            {
+                if (!resolved.Add(copyIndex)) continue;
+
+                var copy = _copies[copyIndex];
+                var binding = copy.Destinations.Length > 0 && _bindingsByDestination.TryGetValue(copy.Destinations[0], out var found)
+                    ? found
+                    : new Binding(copy.Source, copy.CopyType, false, false, copyIndex, new FName("EPostCopyOperation::None"));
+
+                var separator = copy.Source.IndexOf('.');
+                foreach (var destination in copy.Destinations)
+                {
+                    records.Add(new ExposedValueCopyRecord(
+                        separator < 0 ? copy.Source : copy.Source[..separator],
+                        separator < 0 ? "None" : copy.Source[(separator + 1)..],
+                        0, destination, string.Empty, PropertyTypeForCopy(copy.CopyType),
+                        binding.PostCopyOperation, binding.OnlyWhenActive, copy.CopyType, copyIndex, null));
+                }
+            }
+
+            var (boundFunction, function) = _handlerFunctions.GetValueOrDefault(node.Name, (new FName("None"), null));
+            if (records.Count == 0 && boundFunction.IsNone && function is null or { IsNull: true }) continue;
+
+            // A handler is only useful attached to the node it names, and readers look that node up in the CDO.
+            // Unversioned serialisation drops a node whose struct is entirely default, so a handler for one of
+            // those would point at nothing - rare, but it makes the entry worse than useless.
+            if (_classDefaultObject?.Properties.Any(property => property.Name.Text == node.Name) != true) continue;
+
+            handlers.Add(new ExposedValueHandler(nodeIndex, node.Name, node.StructName, boundFunction, function, records));
+        }
+
+        return handlers;
     }
 
     private string? Emit()
@@ -345,7 +509,7 @@ public sealed class AnimGraphStorage
             //
             // A connected pin still leaves its last authored literal behind in the CDO, so the copy has to win:
             // showing the literal would claim ModifyBone.Alpha is a hardcoded 1 when it is wired to a variable.
-            if (TakeBinding($"{node.Name}.{propertyName}") is { } direct)
+            if (TakeBinding(DestinationFor(node, propertyName, entry)?.Destination) is { } direct)
             {
                 builder.AppendLine($"{propertyName} <- {FormatBinding(direct)}");
                 return true;
@@ -370,7 +534,7 @@ public sealed class AnimGraphStorage
 
             // By far the common shape: a graph pin writes the mutable through the property access library and
             // the node reads it back, so the mutable slot is a rename of the real source rather than a value.
-            if (TakeBinding($"{_mutablePropertyName}.{mutableName}") is { } binding)
+            if (TakeBinding(DestinationFor(node, propertyName, entry)?.Destination) is { } binding)
             {
                 builder.AppendLine($"{propertyName} <- {FormatBinding(binding)} (via {mutableName})");
                 return true;
@@ -459,9 +623,9 @@ public sealed class AnimGraphStorage
     /// than quietly dropped - copies also target class properties (linked layer inputs, custom node properties)
     /// that no node in this graph declares.
     /// </summary>
-    private Binding? TakeBinding(string destination)
+    private Binding? TakeBinding(string? destination)
     {
-        if (!_bindingsByDestination.TryGetValue(destination, out var binding)) return null;
+        if (destination is null || !_bindingsByDestination.TryGetValue(destination, out var binding)) return null;
         _emittedDestinations.Add(destination);
         return binding;
     }

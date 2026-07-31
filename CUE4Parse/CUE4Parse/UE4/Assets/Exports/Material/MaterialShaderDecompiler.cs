@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Versions;
 
 namespace CUE4Parse.UE4.Assets.Exports.Material;
 
@@ -144,10 +145,9 @@ public static class MaterialShaderDecompiler
                 AppendLegacyResource(sb, material.Name, legacy, referencedTextures, overrides);
                 wroteAny = true;
             }
-            else if (resource.LoadedShaderMap is not null)
+            else if (resource.LoadedShaderMap is { } modern)
             {
-                sb.Append("// ").Append(material.Name)
-                    .Append(": cooked with UE4.25+ preshader bytecode - decompiling this format is not yet supported.");
+                AppendPreshaderResource(sb, material, modern, referencedTextures, overrides);
                 wroteAny = true;
             }
         }
@@ -172,6 +172,103 @@ public static class MaterialShaderDecompiler
         {
             sb.Append("// (no uniform expressions - this permutation has no CPU-evaluated parameters or math)");
         }
+    }
+
+    /// <summary>
+    /// The 4.25+ equivalent of <see cref="AppendLegacyResource"/>: the CPU-folded values are preshader
+    /// opcode ranges rather than an expression tree (see <see cref="MaterialPreshaderDecompiler"/>),
+    /// and the constant buffer is laid out by FUniformExpressionSet::CreateBufferStruct as the vector
+    /// preshaders first, then the scalar ones packed four per float4 - so each printed row is named by
+    /// the register it actually occupies, which is what the pixel-shader layer's cb reads refer to.
+    /// </summary>
+    private static void AppendPreshaderResource(StringBuilder sb, UMaterialInterface material, FMaterialShaderMap shaderMap, IReadOnlyList<UTexture?>? referencedTextures, InstanceParameterOverrides overrides)
+    {
+        var id = shaderMap.ShaderMapId;
+        sb.Append("// ").Append(material.Name)
+            .Append(" | ").Append(shaderMap.ShaderPlatform)
+            .Append(" | Quality=").Append(id.QualityLevel)
+            .Append(" FeatureLevel=").Append(id.FeatureLevel).AppendLine();
+        sb.AppendLine();
+
+        if (shaderMap.Content is not FMaterialShaderMapContent { MaterialCompilationOutput.UniformExpressionSet: { } expressionSet })
+        {
+            sb.Append("// (no uniform expression set in this shader map)");
+            return;
+        }
+
+        var game = material.Owner?.Provider?.Versions.Game ?? EGame.GAME_UE4_LATEST;
+        if (!MaterialPreshaderDecompiler.IsSupported(game))
+        {
+            sb.Append("// ").Append(material.Name)
+                .Append(": this engine version's preshader encoding (")
+                .Append(game)
+                .Append(") is not decoded - only UE 4.26/4.27 preshaders are.");
+            return;
+        }
+
+        var wroteAny = false;
+        wroteAny |= AppendPreshaderArray(sb, "Uniform Vector Expressions", "float4", "UniformVector",
+            expressionSet.UniformVectorPreshaders, expressionSet, game, referencedTextures, overrides);
+        wroteAny |= AppendPreshaderArray(sb, "Uniform Scalar Expressions", "float", "UniformScalar",
+            expressionSet.UniformScalarPreshaders, expressionSet, game, referencedTextures, overrides);
+        wroteAny |= AppendTextureParameters(sb, expressionSet, referencedTextures, overrides);
+
+        if (!wroteAny)
+            sb.Append("// (no uniform expressions - this permutation has no CPU-evaluated parameters or math)");
+    }
+
+    private static bool AppendPreshaderArray(StringBuilder sb, string title, string type, string prefix,
+        FMaterialUniformPreshaderHeader[]? preshaders, FUniformExpressionSet expressionSet, EGame game,
+        IReadOnlyList<UTexture?>? referencedTextures, InstanceParameterOverrides overrides)
+    {
+        if (preshaders is not { Length: > 0 }) return false;
+
+        sb.Append("// ").AppendLine(title);
+        for (var i = 0; i < preshaders.Length; i++)
+        {
+            var expression = MaterialPreshaderDecompiler.Decompile(expressionSet, preshaders[i], game, referencedTextures, overrides);
+            sb.Append(type).Append(' ').Append(prefix).Append(i).Append(" = ")
+                .Append(expression ?? "/* preshader opcodes could not be decoded */ 0").AppendLine(";");
+        }
+        sb.AppendLine();
+        return true;
+    }
+
+    /// <summary>
+    /// Texture parameters are not preshaders - they are serialized directly, with their real name and
+    /// their index into the material's referenced-texture list - so they are listed as-is rather than
+    /// decoded. Slot order is EMaterialTextureParameterType (Standard2D, Cube, Array2D, Volume,
+    /// Virtual), matching FUniformExpressionSet::CreateBufferStruct's own binding order.
+    /// </summary>
+    private static bool AppendTextureParameters(StringBuilder sb, FUniformExpressionSet expressionSet, IReadOnlyList<UTexture?>? referencedTextures)
+    {
+        string[] slotNames = ["Texture2D", "TextureCube", "Texture2DArray", "VolumeTexture", "VirtualTexture"];
+        var wroteAny = false;
+        for (var slot = 0; slot < (expressionSet.UniformTextureParameters?.Length ?? 0); slot++)
+        {
+            var parameters = expressionSet.UniformTextureParameters[slot];
+            if (parameters is not { Length: > 0 }) continue;
+
+            if (!wroteAny) sb.AppendLine("// Uniform Texture Parameters");
+            wroteAny = true;
+            var slotName = slot < slotNames.Length ? slotNames[slot] : $"TextureSlot{slot}";
+            for (var i = 0; i < parameters.Length; i++)
+            {
+                var parameter = parameters[i];
+                var name = MaterialPreshaderDecompiler.GetParameterName(parameter);
+                var asset = referencedTextures is { } textures && parameter.TextureIndex >= 0 && parameter.TextureIndex < textures.Count
+                    ? textures[parameter.TextureIndex]?.Name
+                    : null;
+                sb.Append(slotName).Append(' ').Append(slotName).Append(i).Append(" = ");
+                if (name != null) sb.Append("TextureParameter'").Append(name).Append('\'');
+                else if (asset != null) sb.Append("Texture'").Append(asset).Append('\'');
+                else sb.Append("Texture[").Append(parameter.TextureIndex).Append(']');
+                if (name != null && asset != null) sb.Append(" /* ").Append(asset).Append(" */");
+                sb.Append("; // ").Append(parameter.SamplerSource).AppendLine();
+            }
+        }
+        if (wroteAny) sb.AppendLine();
+        return wroteAny;
     }
 
     private static bool AppendExpressionArray(StringBuilder sb, string title, string type, string prefix, FMaterialUniformExpressionLegacy[] expressions, IReadOnlyList<UTexture?>? referencedTextures, InstanceParameterOverrides overrides)

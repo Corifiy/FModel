@@ -56,9 +56,16 @@ public class URigHierarchy : UObject
         }
 
         bool bAllocateStoragePerElement = FControlRigObjectVersion.Get(archiveForElements) < FControlRigObjectVersion.Type.RigHierarchyIndirectElementStorage;
-        if (Ar.Game == EGame.GAME_Aion2) bAllocateStoragePerElement = false;
 
         var elementCount = archiveForElements.Read<int>();
+
+        // RigHierarchyIndirectElementStorage moved the element payloads out from between the keys to a block of
+        // their own after them, and a game built off a snapshot of the engine can report a version its cooker
+        // didn't behave like. The bytes settle it: an element's static data opens by repeating its own key, so
+        // the key sitting immediately after the first one is either the second element's or the first one again.
+        if (elementCount > 1) bAllocateStoragePerElement = ProbeInterleavedElements(archiveForElements) ?? bAllocateStoragePerElement;
+
+        if (Ar.Game == EGame.GAME_Aion2) bAllocateStoragePerElement = false;
         Elements = new FRigBaseElement[elementCount];
         for (var elementIndex = 0; elementIndex < elementCount; elementIndex++)
         {
@@ -148,6 +155,31 @@ public class URigHierarchy : UObject
             }
         }
     }
+
+    /// <summary>
+    /// Reads the two keys that follow the element count and reports whether they are the same one, which only
+    /// happens when each element's payload sits right behind its key. Null when the bytes don't parse as keys
+    /// at all, leaving the caller's version-derived guess alone.
+    /// </summary>
+    private static bool? ProbeInterleavedElements(FArchive Ar)
+    {
+        var position = Ar.Position;
+        try
+        {
+            var first = new FRigElementKey(Ar);
+            var second = new FRigElementKey(Ar);
+            return first.Type == second.Type && first.Name.Equals(second.Name);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            Ar.Position = position;
+        }
+    }
+
     protected internal override void WriteJson(JsonWriter writer, JsonSerializer serializer)
     {
         base.WriteJson(writer, serializer);

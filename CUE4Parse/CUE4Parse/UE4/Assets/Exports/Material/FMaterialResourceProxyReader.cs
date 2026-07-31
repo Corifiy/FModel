@@ -26,6 +26,13 @@ public class FMaterialResourceProxyReader : FArchive
     /// detected by parse-validate-retry in FMaterial.DeserializeInlineShaderMap.
     /// </summary>
     public ELegacyShaderMapProfile LegacyProfile = ELegacyShaderMapProfile.UE4_23;
+    /// <summary>
+    /// Whether the frozen shader maps read through this reader use the post-RDG uniform buffer layout,
+    /// once <see cref="FShaderMapBase"/> has had to detect it; null until then, meaning "use the
+    /// ShaderMap.HasRDGUniformBuffers option". Every resource of one material was cooked by the same
+    /// engine, so detecting it once spares the rest the failed first attempt.
+    /// </summary>
+    public bool? bHasRDGUniformBuffers;
     private readonly FNameEntrySerialized[]? _nameMap;
     private readonly bool _readNameMap;
     private readonly bool _passthrough;
@@ -170,6 +177,7 @@ public class FMaterialResourceProxyReader : FArchive
             ? new FMaterialResourceProxyReader(clonedInner, false, false)
             : new FMaterialResourceProxyReader(clonedInner);
         clone.LegacyProfile = LegacyProfile;
+        clone.bHasRDGUniformBuffers = bHasRDGUniformBuffers;
         return clone;
     }
 }

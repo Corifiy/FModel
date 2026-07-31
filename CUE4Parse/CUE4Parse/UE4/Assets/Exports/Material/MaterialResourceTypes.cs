@@ -130,12 +130,7 @@ public abstract class FShaderMapBase
     {
         FrozenArchive = new FMemoryImageResult();
         FrozenArchive.LoadFromArchive(Ar, PointerTable);
-
-        Content.Deserialize(new FMemoryImageArchive(new FByteArchive("FShaderMapContent", FrozenArchive.FrozenObject, Ar.Versions))
-        {
-            Names = FrozenArchive.GetNames(),
-            PointerTable = PointerTable
-        });
+        DeserializeContent(Ar);
 
         var bShareCode = Ar.ReadBoolean();
         if (Ar.bUseNewFormat)
@@ -158,6 +153,44 @@ public abstract class FShaderMapBase
         else
         {
             Code = new FShaderMapResourceCode(Ar);
+        }
+    }
+
+    /// <summary>
+    /// Parses the frozen content image. Nothing here consumes <paramref name="Ar"/> - the image was
+    /// already read into <see cref="FMemoryImageResult.FrozenObject"/> - so a failed attempt costs
+    /// nothing but the parse itself and can simply be retried under a different field layout.
+    /// <para>
+    /// That retry exists for the RDG uniform buffer rework, which landed during the 4.26 cycle rather
+    /// than at the version boundary: it added <c>GraphUniformBuffers</c> to FShaderParameterBindings
+    /// and the graph resource arrays to FRHIUniformBufferLayoutInitializer. Branches cut from 4.26 dev
+    /// before it (Fortnite 14.x, which already carries every other 4.26 memory-image change - merged
+    /// FShaderParameterBindings::ResourceParameters, FShaderParameterMapInfo::Hash,
+    /// FMemoryImageResult's MinimalNames, FMemoryImage material parameter infos) still write the 4.25
+    /// shape for those two, and the frozen image carries no version of its own to tell them apart.
+    /// </para>
+    /// </summary>
+    private void DeserializeContent(FMaterialResourceProxyReader Ar)
+    {
+        var names = FrozenArchive.GetNames();
+        void Parse(bool bHasRDGUniformBuffers) =>
+            Content.Deserialize(new FMemoryImageArchive(new FByteArchive("FShaderMapContent", FrozenArchive.FrozenObject, Ar.Versions))
+            {
+                Names = names,
+                PointerTable = PointerTable,
+                bHasRDGUniformBuffers = bHasRDGUniformBuffers
+            });
+
+        var bDefault = Ar.bHasRDGUniformBuffers ?? Ar.Versions["ShaderMap.HasRDGUniformBuffers"];
+        try
+        {
+            Parse(bDefault);
+        }
+        catch (Exception e) when (e is not OutOfMemoryException && bDefault && Ar.Game is >= EGame.GAME_UE4_26 and < EGame.GAME_UE5_0)
+        {
+            Log.Verbose(e, "Shader map content failed to parse with the post-RDG uniform buffer layout; retrying with the pre-RDG one.");
+            Parse(false);
+            Ar.bHasRDGUniformBuffers = false;
         }
     }
 }
@@ -307,7 +340,7 @@ public class FShaderParameterBindings
         }
 
         BindlessResourceParameters = Ar.Game >= EGame.GAME_UE5_1 ? Ar.ReadArray<FBindlessResourceParameter>() : [];
-        GraphUniformBuffers = Ar.Game >= EGame.GAME_UE4_26 ? Ar.ReadArray<FParameterStructReference>() : [];
+        GraphUniformBuffers = Ar.Game >= EGame.GAME_UE4_26 && Ar.bHasRDGUniformBuffers ? Ar.ReadArray<FParameterStructReference>() : [];
         ParameterReferences = Ar.ReadArray<FParameterStructReference>();
         if (Ar.Game is EGame.GAME_ArenaBreakoutInfinite) Ar.Position += 16;
 
@@ -1250,7 +1283,7 @@ public class FRHIUniformBufferLayoutInitializer
 
             Ar.Position = Ar.Position.Align(4);
         }
-        else if (Ar.Game >= EGame.GAME_UE4_26)
+        else if (Ar.Game >= EGame.GAME_UE4_26 && Ar.bHasRDGUniformBuffers)
         {
             ConstantBufferSize = Ar.Read<uint>();
             StaticSlot = Ar.Read<byte>();

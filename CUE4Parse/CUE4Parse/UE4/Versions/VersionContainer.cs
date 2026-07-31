@@ -79,6 +79,12 @@ namespace CUE4Parse.UE4.Versions
             // fields
             Options["RawIndexBuffer.HasShouldExpandTo32Bit"] = Game >= GAME_UE4_25 && Game != GAME_DeltaForce;
             Options["ShaderMap.UseNewCookedFormat"] = Game >= GAME_UE5_0;
+            // The RDG uniform buffer rework (FShaderParameterBindings::GraphUniformBuffers, the graph
+            // resource arrays of FRHIUniformBufferLayoutInitializer) landed during the 4.26 cycle, so
+            // branches cut from 4.26 dev before it - Fortnite 14.x (14.60 still lacks it, 16.40 has
+            // it) - still freeze the 4.25 shape for both. FShaderMapBase.DeserializeContent falls
+            // back to it on a failed parse, so this stays a plain version default.
+            Options["ShaderMap.HasRDGUniformBuffers"] = Game >= GAME_UE4_26;
             Options["SkeletalMesh.UseNewCookedFormat"] = Game >= GAME_UE4_24;
             Options["SkeletalMesh.HasRayTracingData"] = Game is >= GAME_UE4_27 or GAME_UE4_25_Plus;
             Options["StaticMesh.HasLODsShareStaticLighting"] = Game is < GAME_UE4_15 or >= GAME_UE4_16; // Exists in all engine versions except UE4.15
