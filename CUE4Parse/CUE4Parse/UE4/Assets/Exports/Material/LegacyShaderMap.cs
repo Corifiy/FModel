@@ -348,9 +348,10 @@ public class FMaterialShaderMapIdLegacy
     public FSHAHash CookedShaderMapIdHash;
 
     /// <summary>
-    /// Only populated on the very-legacy (pre-proxy-reader, ~4.19-era) anchor-scan path below - that
-    /// era's FMaterialShaderMapId::Serialize (confirmed against UE_4.19\...\MaterialShader.cpp:480)
-    /// carries far more fields than the simplified cooked form used from roughly 4.22 onward: Usage,
+    /// Only populated on the full (pre-4.23) anchor-scan path below - that era's
+    /// FMaterialShaderMapId::Serialize (confirmed against UE_4.19\...\MaterialShader.cpp:480 and
+    /// UE_4.22\...\MaterialShader.cpp:484)
+    /// carries far more fields than the simplified cooked form: Usage,
     /// BaseMaterialId, a full FStaticParameterSet (4 sub-arrays: StaticSwitchParameters/
     /// StaticComponentMaskParameters/TerrainLayerWeightParameters/MaterialLayersParameters, the last
     /// itself containing a version-gated nested FMaterialLayersFunctions), ReferencedFunctions,
@@ -378,11 +379,20 @@ public class FMaterialShaderMapIdLegacy
     /// </summary>
     public FGuid? BaseMaterialIdFromVeryLegacyScan;
 
+    /// <summary>
+    /// The stripped-down cooked form (QualityLevel/FeatureLevel/CookedShaderMapIdHash) is a 4.23
+    /// change: 4.23's FMaterialShaderMapId::Serialize gained a bLoadedByCookedMaterial branch
+    /// (MaterialShader.cpp:506) that skips everything editor-only. 4.22 and earlier
+    /// (MaterialShader.cpp:484) have no such branch and write the whole struct even when cooked, so
+    /// they take the full path below. That is independent of which container the resource is in -
+    /// 4.22 already has FMaterialResourceProxyReader (MaterialShared.cpp:3338) while 4.19 does not -
+    /// hence the two separate conditions rather than one.
+    /// </summary>
     public FMaterialShaderMapIdLegacy(FArchive Ar, string? expectedFriendlyName = null)
     {
-        if (Ar is FMaterialResourceProxyReader { IsPassthrough: true })
+        if (Ar is FMaterialResourceProxyReader { IsPassthrough: true } || Ar.Game < EGame.GAME_UE4_23)
         {
-            DeserializeVeryLegacy(Ar, expectedFriendlyName);
+            DeserializeFull(Ar, expectedFriendlyName);
             return;
         }
 
@@ -391,7 +401,7 @@ public class FMaterialShaderMapIdLegacy
         CookedShaderMapIdHash = new FSHAHash(Ar);
     }
 
-    private void DeserializeVeryLegacy(FArchive Ar, string? expectedFriendlyName)
+    private void DeserializeFull(FArchive Ar, string? expectedFriendlyName)
     {
         Ar.Position += 4; // Usage (uint32) - not needed
         BaseMaterialIdFromVeryLegacyScan = Ar.Read<FGuid>();
