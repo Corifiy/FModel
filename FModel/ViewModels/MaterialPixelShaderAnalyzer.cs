@@ -537,7 +537,7 @@ public static class MaterialPixelShaderAnalyzer
         var srvMap = ReadResourceMap(blob, ref pos);
         ReadResourceMap(blob, ref pos); // SamplerMap
         ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
-        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var layoutHashes = ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
         var textureMap = ReadResourceMap(blob, ref pos);
         if (!HasDxbcMagic(blob, pos))
         {
@@ -569,34 +569,50 @@ public static class MaterialPixelShaderAnalyzer
         var vecBase = vtStackCount * 32 + virtualCount * 16;
         var scalarBase = vecBase + vecCount * 16;
 
-        // data-driven uniform buffers are not auto-bound (ShaderParameterMetadata GetStructList
-        // only registers static-slot structs), so "Material" is the parameter-map slot that is
-        // NOT among the auto-bound UniformBufferParameters
-        var autoBound = new HashSet<int>((shader.UniformBufferParameters ?? []).Select(p => (int) p.BaseIndex));
-        var unnamed = (shader.ParameterMapInfo?.UniformBuffers ?? [])
-            .Select(p => (int) p.BaseIndex)
-            .Distinct()
-            .Where(s => !autoBound.Contains(s))
-            .ToList();
-        int materialSlot;
-        switch (unnamed.Count)
+        // The shader's own resource table stores, per bound uniform buffer slot, the layout hash of
+        // the struct bound there (FD3D11ShaderResourceTable::ResourceTableLayoutHashes), and the
+        // material's own layout hash is serialized right beside its uniform expression set
+        // (FRHIUniformBufferLayoutInitializer::Hash). Matching those two identifies the Material
+        // buffer exactly - both sides come straight out of the cook, so nothing here is inferred.
+        var materialLayoutHash = expressionSet.UniformBufferLayoutInitializer?.Hash ?? 0u;
+        var materialSlot = materialLayoutHash != 0
+            ? Array.FindIndex(layoutHashes, hash => hash == materialLayoutHash)
+            : -1;
+
+        if (materialSlot < 0)
         {
-            case 0:
-                materialSlot = -1; // no material constants or textures bound in this shader
-                break;
-            case 1:
-                materialSlot = unnamed[0];
-                break;
-            default:
-                var expectedVec4s = vtStackCount * 2 + virtualCount + vecCount + (scalarCount + 3) / 4;
-                var matches = unnamed.Where(s => declaredCbSizes.TryGetValue(s, out var size) && size == expectedVec4s).ToList();
-                if (matches.Count != 1)
-                {
-                    error = $"{typeName}: could not identify the Material constant buffer slot";
-                    return false;
-                }
-                materialSlot = matches[0];
-                break;
+            // No usable layout hash. Fall back to elimination: data-driven uniform buffers are not
+            // auto-bound (ShaderParameterMetadata GetStructList only registers static-slot structs),
+            // so "Material" is the parameter-map slot that is NOT among the auto-bound
+            // UniformBufferParameters.
+            var autoBound = new HashSet<int>((shader.UniformBufferParameters ?? []).Select(p => (int) p.BaseIndex));
+            var unnamed = (shader.ParameterMapInfo?.UniformBuffers ?? [])
+                .Select(p => (int) p.BaseIndex)
+                .Distinct()
+                .Where(s => !autoBound.Contains(s))
+                .ToList();
+            switch (unnamed.Count)
+            {
+                case 0:
+                    materialSlot = -1; // no material constants or textures bound in this shader
+                    break;
+                case 1:
+                    materialSlot = unnamed[0];
+                    break;
+                default:
+                    // Last resort, and only sound when the shader happens to reference the buffer's
+                    // last row: dcl_constantbuffer declares the highest row actually referenced, not
+                    // the struct's full size, so this under-counts for every shader that doesn't.
+                    var expectedVec4s = vtStackCount * 2 + virtualCount + vecCount + (scalarCount + 3) / 4;
+                    var matches = unnamed.Where(s => declaredCbSizes.TryGetValue(s, out var size) && size == expectedVec4s).ToList();
+                    if (matches.Count != 1)
+                    {
+                        error = $"{typeName}: could not identify the Material constant buffer slot";
+                        return false;
+                    }
+                    materialSlot = matches[0];
+                    break;
+            }
         }
 
         var textureByRegister = BuildTextureRegisterMap(expressionSet, materialSlot, srvMap, textureMap);
@@ -1055,7 +1071,7 @@ public static class MaterialPixelShaderAnalyzer
         var srvMap = ReadResourceMap(blob, ref pos);
         ReadResourceMap(blob, ref pos); // SamplerMap
         ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
-        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var layoutHashes = ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
         var textureMap = ReadResourceMap(blob, ref pos);
         if (!HasDxbcMagic(blob, pos))
         {
@@ -1137,7 +1153,7 @@ public static class MaterialPixelShaderAnalyzer
         var srvMap = ReadResourceMap(blob, ref pos);
         ReadResourceMap(blob, ref pos); // SamplerMap
         ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
-        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var layoutHashes = ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
         var textureMap = ReadResourceMap(blob, ref pos);
         if (!HasDxbcMagic(blob, pos)) return result;
 
@@ -1203,7 +1219,7 @@ public static class MaterialPixelShaderAnalyzer
         var srvMap = ReadResourceMap(blob, ref pos);
         ReadResourceMap(blob, ref pos); // SamplerMap
         ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
-        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var layoutHashes = ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
         var textureMap = ReadResourceMap(blob, ref pos);
         if (!HasDxbcMagic(blob, pos))
         {
@@ -1298,7 +1314,7 @@ public static class MaterialPixelShaderAnalyzer
         var srvMap = ReadResourceMap(blob, ref pos);
         ReadResourceMap(blob, ref pos); // SamplerMap
         ReadResourceMap(blob, ref pos); // UnorderedAccessViewMap
-        ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
+        var layoutHashes = ReadResourceMap(blob, ref pos); // ResourceTableLayoutHashes
         var textureMap = ReadResourceMap(blob, ref pos);
         if (!HasDxbcMagic(blob, pos)) return results;
 

@@ -1169,6 +1169,20 @@ Three pieces:
    `PrintCtx` resolves a cb row through whichever format the resource has. Printing, CSE, texture
    naming, MPC resolution and the pin listing are shared verbatim.
 
+### Identifying the Material constant buffer (was the one real bug)
+
+The ported `TryAnalyzeShader` picked the Material cbuffer by elimination, breaking ties on
+`dcl_constantbuffer`'s declared size vs. a size recomputed from the expression set. That tie-break is
+unsound: **DXBC declares the highest row a shader actually references, not the struct's full size**, so
+any shader that doesn't touch the last row under-counts. `M_FN_Character_Ghost_Robber_Master` (14.40)
+hit exactly that — two data-driven slots (Material + a MaterialCollection), declared 78 vec4s against a
+1648-byte (103 vec4) layout, so neither matched and the whole decompile failed.
+
+Replaced with an exact match: the blob's `FD3D11ShaderResourceTable::ResourceTableLayoutHashes` gives
+the layout hash of the struct bound at each slot, and `FRHIUniformBufferLayoutInitializer::Hash` is
+serialized beside the uniform expression set. For that material both are `108006911` at slot 2. The old
+elimination logic is kept only as the fallback for cooks with no usable layout hash.
+
 ### Verified
 
 `MI_Apollo_Roads_Straight`/`M_Apollo_Roads_Master` reconstruct all seven GBuffer pins (Base_Color,
