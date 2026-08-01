@@ -149,11 +149,17 @@ public static class MaterialPixelShaderAnalyzer
 {
     #region Public entry point
 
-    public static PixelShaderWiring Analyze(FMaterialShaderMap shaderMap, FUniformExpressionSet expressionSet, bool usesGBuffer)
+    /// <summary>
+    /// <paramref name="sharedCodeResolver"/> maps a shader's <c>FShader.ResourceIndex</c> to its
+    /// bytecode for the (usual, on shipped titles) case where the shader map shares its code with a
+    /// .ushaderbytecode library instead of inlining it - see <see cref="MaterialShaderLibrary"/>.
+    /// </summary>
+    public static PixelShaderWiring Analyze(FMaterialShaderMap shaderMap, FUniformExpressionSet expressionSet, bool usesGBuffer,
+        Func<int, byte[]> sharedCodeResolver = null)
     {
         var wiring = new PixelShaderWiring();
         var code = shaderMap?.Code;
-        if (code == null || code.ShaderEntries.Length == 0)
+        if ((code == null || code.ShaderEntries.Length == 0) && sharedCodeResolver == null)
         {
             wiring.FailureReason = "compiled shader code is not inlined (stored in the shared shader library)";
             return wiring;
@@ -176,7 +182,7 @@ public static class MaterialPixelShaderAnalyzer
         {
             try
             {
-                if (TryAnalyzeShader(shader, typeName, code, expressionSet, usesGBuffer, wiring, out var error))
+                if (TryAnalyzeShader(shader, typeName, code, sharedCodeResolver, expressionSet, usesGBuffer, wiring, out var error))
                 {
                     wiring.Success = true;
                     wiring.ShaderTypeName = typeName;
@@ -495,24 +501,34 @@ public static class MaterialPixelShaderAnalyzer
     #region Per-shader analysis
 
     private static bool TryAnalyzeShader(FShader shader, string typeName, FShaderMapResourceCode code,
-        FUniformExpressionSet expressionSet, bool usesGBuffer, PixelShaderWiring wiring, out string error)
+        Func<int, byte[]> sharedCodeResolver, FUniformExpressionSet expressionSet, bool usesGBuffer, PixelShaderWiring wiring, out string error)
     {
-        if (shader.ResourceIndex < 0 || shader.ResourceIndex >= code.ShaderEntries.Length)
+        byte[] blob;
+        if (code != null && shader.ResourceIndex >= 0 && shader.ResourceIndex < code.ShaderEntries.Length)
         {
-            error = $"{typeName}: shader entry {shader.ResourceIndex} out of range";
-            return false;
-        }
-        var entry = code.ShaderEntries[shader.ResourceIndex];
-        if (entry.Code == null || entry.Code.Length == 0)
-        {
-            error = $"{typeName}: shader entry is empty";
-            return false;
-        }
+            var entry = code.ShaderEntries[shader.ResourceIndex];
+            if (entry.Code == null || entry.Code.Length == 0)
+            {
+                error = $"{typeName}: shader entry is empty";
+                return false;
+            }
 
-        // entries are LZ4 compressed unless they came out the same size (ShaderResource.cpp)
-        var blob = entry.Code.Length == entry.UncompressedSize
-            ? entry.Code
-            : Compression.Decompress(entry.Code, entry.UncompressedSize, CompressionMethod.LZ4);
+            // entries are LZ4 compressed unless they came out the same size (ShaderResource.cpp)
+            blob = entry.Code.Length == entry.UncompressedSize
+                ? entry.Code
+                : Compression.Decompress(entry.Code, entry.UncompressedSize, CompressionMethod.LZ4);
+        }
+        else
+        {
+            // the map shares its code: the same ResourceIndex selects the shader inside the library's
+            // entry for this shader map (the resolver already returns it decompressed)
+            blob = sharedCodeResolver?.Invoke(shader.ResourceIndex);
+            if (blob == null || blob.Length == 0)
+            {
+                error = $"{typeName}: shader entry {shader.ResourceIndex} could not be resolved from the shared shader library";
+                return false;
+            }
+        }
 
         // blob layout on PC D3D: [FD3D11ShaderResourceTable][DXBC container][optional data]
         // (D3D11ShaderResources.h: ResourceTableBits, then the five resource maps)
@@ -607,10 +623,23 @@ public static class MaterialPixelShaderAnalyzer
         }
         try
         {
-            // 4.25+ auto-bound uniform buffer parameters carry no names here, so foreign
-            // cb leaves keep their raw cb#[row] labels
+            // cb slot -> uniform buffer struct name. 4.25+ replaced the legacy name/parameter pairs
+            // with two parallel arrays - the struct's hashed type name and its binding - so the name
+            // comes back through the same hashed-name table the shader types use. Anything not in
+            // that table keeps its raw cb#[row] label rather than being labelled by position.
+            // NOTE: these resolve to the shader variable name ("View"), not the struct type name
+            // ("FViewUniformShaderParameters") the printer's engine-row tables are keyed by, so
+            // individual View/Primitive rows stay unnamed here. That is deliberate: those tables
+            // describe the 4.23 (and 4.19) member layout, and naming a 4.26 row through them would
+            // confidently print the wrong field. Naming them needs a layout table for this era.
+            var cbNames = new Dictionary<int, string>();
+            var structs = shader.UniformBufferParameterStructs ?? [];
+            var bindings = shader.UniformBufferParameters ?? [];
+            for (var i = 0; i < Math.Min(structs.Length, bindings.Length); i++)
+                if (HashedNamesProvider.TryGetEntry(structs[i].Hash, out var bufferName) && !string.IsNullOrEmpty(bufferName))
+                    cbNames.TryAdd(bindings[i].BaseIndex, bufferName);
             BuildPinExpressions(instructions, context, outputRegToTarget, usesGBuffer,
-                null, inputSemantics, resourceDimensions, wiring);
+                cbNames, inputSemantics, resourceDimensions, wiring);
         }
         catch
         {

@@ -34,7 +34,15 @@ internal abstract class RigVMStorage
     {
         var name = GetRegisterName(operand);
         if (name is null) return $"unresolved_{operand.MemoryType.ToString().ToLower()}_{operand.RegisterIndex}";
-        return name + (operand.RegisterOffset != ushort.MaxValue ? GetOffsetSuffix(operand) ?? "" : "");
+        if (operand.RegisterOffset == ushort.MaxValue) return name;
+
+        // A variable is read a member at a time, and the paths into it belong to the VM rather than to either
+        // block of memory - so an external operand's offset resolves against a table the storages never see.
+        var suffix = operand.MemoryType == ERigVMMemoryType.External
+            ? GetExternalOffsetSuffix(operand)
+            : GetOffsetSuffix(operand);
+
+        return name + (suffix ?? "");
     }
 
     /// <summary>
@@ -44,8 +52,16 @@ internal abstract class RigVMStorage
     /// </summary>
     protected string[] ExternalNames = [];
 
+    /// <summary>Paths into those variables, for operands that address one member rather than the whole thing.</summary>
+    protected FRigVMPropertyPathDescription[] ExternalPropertyPaths = [];
+
     protected string? GetExternalName(FRigVMOperand operand) =>
         operand.RegisterIndex < ExternalNames.Length ? ExternalNames[operand.RegisterIndex] : null;
+
+    private string? GetExternalOffsetSuffix(FRigVMOperand operand) =>
+        operand.RegisterOffset < ExternalPropertyPaths.Length
+            ? FormatSegmentPath(ExternalPropertyPaths[operand.RegisterOffset].SegmentPath)
+            : null;
 
     public static RigVMStorage? Resolve(UClass uClass, URigVM vm)
     {
@@ -57,7 +73,10 @@ internal abstract class RigVMStorage
         // win wherever they are present.
         var storage = PropertyBagStorage.TryCreate(uClass, vm) ?? (RigVMStorage?) GeneratedClassStorage.TryCreate(uClass, vm);
         if (storage is not null)
+        {
             storage.ExternalNames = (uClass.ChildProperties ?? []).Select(property => property.Name.Text).ToArray();
+            storage.ExternalPropertyPaths = vm.ExternalPropertyPathDescriptions ?? [];
+        }
         return storage;
     }
 
@@ -112,18 +131,26 @@ internal abstract class RigVMStorage
 
         foreach (var unitName in unitNames)
         {
-            if (!name.StartsWith(unitName, StringComparison.Ordinal)) continue;
-
-            // Consume the instance suffix the compiler appends to disambiguate nodes ("_0", "_1_2", ...).
-            var index = unitName.Length;
-            while (index < name.Length && name[index] == '_' && index + 1 < name.Length && char.IsDigit(name[index + 1]))
+            // A node is named after its unit type, but one authored inside a function carries that function's
+            // scope in front of it ("Deform_UpperArm_FNC_ParentConstraint_3_Child"), so the unit name is looked
+            // for at any underscore boundary rather than only at the start. Scanning from the end takes the
+            // last match, since a function's own name can repeat the unit name earlier in the string.
+            for (var start = name.Length - unitName.Length; start >= 0; start--)
             {
-                index++;
-                while (index < name.Length && char.IsDigit(name[index])) index++;
-            }
+                if (string.CompareOrdinal(name, start, unitName, 0, unitName.Length) != 0) continue;
+                if (start > 0 && name[start - 1] != '_') continue;
 
-            if (index < name.Length && name[index] == '_')
-                return $"{name[..index]}.{name[(index + 1)..]}";
+                // Consume the instance suffix the compiler appends to disambiguate nodes ("_0", "_1_2", ...).
+                var index = start + unitName.Length;
+                while (index < name.Length && name[index] == '_' && index + 1 < name.Length && char.IsDigit(name[index + 1]))
+                {
+                    index++;
+                    while (index < name.Length && char.IsDigit(name[index])) index++;
+                }
+
+                if (index < name.Length && name[index] == '_')
+                    return $"{name[..index]}.{name[(index + 1)..]}";
+            }
         }
 
         return name;
@@ -176,8 +203,10 @@ internal abstract class RigVMStorage
 
             // A bone list with its per-bone offsets is the substance of a rig, so it is never summarised away.
             // Past the point where it still reads on one line it keeps its original layout instead, and the
-            // caller lifts it out of the node's comment into a statement of its own.
-            return singleLine.Length <= 300 ? singleLine : rendered.TrimEnd();
+            // caller lifts it out of the node's comment into a statement of its own. The budget is small on
+            // purpose: a couple of fields still read fine inline, but a nest of filters or weighted parents
+            // crammed onto one line stops being something anyone can follow.
+            return singleLine.Length <= 100 ? singleLine : rendered.TrimEnd();
         }
 
         return "default";

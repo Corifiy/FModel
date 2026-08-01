@@ -240,7 +240,7 @@ public static class MaterialShaderDecompiler
     /// decoded. Slot order is EMaterialTextureParameterType (Standard2D, Cube, Array2D, Volume,
     /// Virtual), matching FUniformExpressionSet::CreateBufferStruct's own binding order.
     /// </summary>
-    private static bool AppendTextureParameters(StringBuilder sb, FUniformExpressionSet expressionSet, IReadOnlyList<UTexture?>? referencedTextures)
+    private static bool AppendTextureParameters(StringBuilder sb, FUniformExpressionSet expressionSet, IReadOnlyList<UTexture?>? referencedTextures, InstanceParameterOverrides overrides)
     {
         string[] slotNames = ["Texture2D", "TextureCube", "Texture2DArray", "VolumeTexture", "VirtualTexture"];
         var wroteAny = false;
@@ -256,9 +256,13 @@ public static class MaterialShaderDecompiler
             {
                 var parameter = parameters[i];
                 var name = MaterialPreshaderDecompiler.GetParameterName(parameter);
-                var asset = referencedTextures is { } textures && parameter.TextureIndex >= 0 && parameter.TextureIndex < textures.Count
-                    ? textures[parameter.TextureIndex]?.Name
-                    : null;
+                // A material instance can point a texture parameter at a different asset than the base
+                // material's cooked default - show what this instance actually samples when it does.
+                var asset = name != null && overrides.Textures.TryGetValue(name, out var overridden) && overridden != null
+                    ? overridden.Name
+                    : referencedTextures is { } textures && parameter.TextureIndex >= 0 && parameter.TextureIndex < textures.Count
+                        ? textures[parameter.TextureIndex]?.Name
+                        : null;
                 sb.Append(slotName).Append(' ').Append(slotName).Append(i).Append(" = ");
                 if (name != null) sb.Append("TextureParameter'").Append(name).Append('\'');
                 else if (asset != null) sb.Append("Texture'").Append(asset).Append('\'');

@@ -2158,8 +2158,13 @@ public static class BlueprintDecompilerUtils
     // authored pin values. See Engine/Source/Runtime/RigVM/Public/RigVMCore/RigVMByteCode.h.
     public static string? DecompileRigVMByteCode(UClass uClass, out HashSet<string> suppressedProperties, out List<string> declarationOrder)
     {
-        suppressedProperties = [];
-        declarationOrder = [];
+        // Aliased so the per-instruction writer below can reach them: a local function cannot capture an out
+        // parameter, and both are reference types, so the caller sees every addition made through the alias.
+        var suppressed = new HashSet<string>();
+        var declared = new List<string>();
+        suppressedProperties = suppressed;
+        declarationOrder = declared;
+
         if (uClass is not URigVMBlueprintGeneratedClass { VM: { } vm }) return null;
         if (vm.ByteCodeStorage is not { Instructions.Count: > 0 } byteCode) return null;
 
@@ -2168,7 +2173,7 @@ public static class BlueprintDecompilerUtils
         if (storage is null) return null;
 
         foreach (var name in new[] { "VM", "Hierarchy", "HierarchyContainer", "DrawContainer", "DynamicHierarchy" })
-            suppressedProperties.Add(name);
+            suppressed.Add(name);
 
         string FormatOperand(FRigVMOperand operand) => storage.FormatOperand(operand);
 
@@ -2190,7 +2195,22 @@ public static class BlueprintDecompilerUtils
         var writtenRegisters = new HashSet<(ERigVMMemoryType, ushort)>();
 
         var step = 1;
-        for (var index = 0; index < byteCode.Instructions.Count; index++)
+
+        // A pin marked lazy is compiled into a block of its own, parked after the main body and reached only
+        // through a RunInstructions op. Walking the instructions in order would print such a block at the end,
+        // long after the node that consumes its result - so the block's instructions are held back here and
+        // written out where the op actually runs them.
+        var lazyBlockInstructions = new HashSet<int>();
+        foreach (var instruction in byteCode.Instructions)
+        {
+            if (instruction is not FRigVMRunInstructionsOp lazyOp) continue;
+            for (var lazy = lazyOp.StartInstruction; lazy <= lazyOp.EndInstruction; lazy++)
+                lazyBlockInstructions.Add(lazy);
+        }
+
+        var emittedLazyBlocks = new HashSet<(int Start, int End)>();
+
+        void EmitInstruction(int index)
         {
             switch (byteCode.Instructions[index])
             {
@@ -2221,7 +2241,11 @@ public static class BlueprintDecompilerUtils
                         var registerName = storage.GetRegisterName(argument);
                         if (registerName is null || !registerName.Contains('.')) continue;
                         var prefix = registerName.SubstringBefore('.');
-                        if (prefix.TrimEnd("_0123456789".ToCharArray()) != unitShortName) continue;
+
+                        // A node authored inside a function keeps that function's scope in its name
+                        // ("Deform_UpperArm_FNC_ParentConstraint_3"), so the unit type it ends with is what
+                        // identifies it - anchoring at the start would only ever match the top-level graph.
+                        if (!prefix.TrimEnd("_0123456789".ToCharArray()).EndsWith(unitShortName, StringComparison.Ordinal)) continue;
                         allPrefixes.Add(prefix);
                         if (argument.MemoryType == ERigVMMemoryType.Work && !writtenRegisters.Contains((argument.MemoryType, argument.RegisterIndex)))
                             freshPrefixes.Add(prefix);
@@ -2276,7 +2300,7 @@ public static class BlueprintDecompilerUtils
                     foreach (var argument in executeOp.Arguments)
                         writtenRegisters.Add((argument.MemoryType, argument.RegisterIndex));
 
-                    if (suppressedProperties.Add(nodeName)) declarationOrder.Add(nodeName);
+                    if (suppressed.Add(nodeName)) declared.Add(nodeName);
 
                     stringBuilder.AppendLine($"// [{step}] {nodeName} ({unitType})");
                     foreach (var assignment in bulkLiterals) stringBuilder.AppendLine(assignment);
@@ -2329,8 +2353,31 @@ public static class BlueprintDecompilerUtils
                     stringBuilder.AppendLine($"// {baseOp.OpCode}");
                     break;
                 case FRigVMRunInstructionsOp runOp:
-                    stringBuilder.AppendLine($"// RunInstructions {runOp.StartInstruction}..{runOp.EndInstruction} over {FormatOperand(runOp.Arg)}");
+                {
+                    var target = FormatOperand(runOp.Arg);
+
+                    // An empty range is the compiler saying the value is already up to date at this point.
+                    if (runOp.EndInstruction < runOp.StartInstruction)
+                    {
+                        stringBuilder.AppendLine($"// {target} is already computed here");
+                        break;
+                    }
+
+                    // Several nodes can depend on the same lazy block; it is written out once, at the first
+                    // node that needs it, and referred back to afterwards rather than repeated.
+                    if (!emittedLazyBlocks.Add((runOp.StartInstruction, runOp.EndInstruction)))
+                    {
+                        stringBuilder.AppendLine($"// runs the block computing {target} again (written out above)");
+                        break;
+                    }
+
+                    stringBuilder.AppendLine($"// {target} is computed on demand here:");
+                    stringBuilder.IncreaseIndentation();
+                    for (var lazy = runOp.StartInstruction; lazy <= runOp.EndInstruction && lazy < byteCode.Instructions.Count; lazy++)
+                        EmitInstruction(lazy);
+                    stringBuilder.DecreaseIndentation();
                     break;
+                }
                 case FRigVMJumpToBranchOp branchOp:
                     stringBuilder.AppendLine($"// JumpToBranch on {FormatOperand(branchOp.Arg)} (branch table from {branchOp.FirstBranchInfoIndex})");
                     break;
@@ -2344,6 +2391,12 @@ public static class BlueprintDecompilerUtils
                     stringBuilder.AppendLine($"// <{byteCode.Instructions[index].GetType().Name}>");
                     break;
             }
+        }
+
+        for (var index = 0; index < byteCode.Instructions.Count; index++)
+        {
+            if (lazyBlockInstructions.Contains(index)) continue;
+            EmitInstruction(index);
         }
 
         stringBuilder.CloseBlock();
@@ -2378,6 +2431,19 @@ public static class BlueprintDecompilerUtils
             // a constant shared between two pins carries only the first one's name, so repeating it here
             // would attribute the value to the wrong pin.
             if (pin is not null && (pin == text || !labelled.Add(pin))) pin = null;
+
+            // A value that kept its own layout is written out as it stands, with the pin it feeds on its
+            // opening line - the separator belongs after the closing brace, where it would otherwise land
+            // in the middle of the value.
+            if (text.Contains('\n'))
+            {
+                var lines = text.Split('\n');
+                if (pin is not null) lines[0] = lines[0].TrimEnd() + $" // {pin}";
+                lines[^1] = lines[^1].TrimEnd() + separator;
+
+                stringBuilder.AppendLine(string.Join('\n', lines));
+                continue;
+            }
 
             stringBuilder.AppendLine(pin is null ? $"{text}{separator}" : $"{text}{separator} // {pin}");
         }

@@ -10,6 +10,7 @@ using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Shaders;
+using CUE4Parse.UE4.Versions;
 
 namespace FModel.ViewModels;
 
@@ -79,16 +80,63 @@ public static class PixelShaderDecompiler
     public static string? DecompilePixelShaderToPseudo(UMaterialInterface material)
     {
         var chain = BuildInstanceChain(material);
-        var resources = chain.SelectMany(m => m.LoadedMaterialResources ?? [])
-            .Where(r => r.LoadedShaderMapLegacy != null)
-            .ToList();
-        if (resources.Count == 0) return null;
+        var resources = chain.SelectMany(m => m.LoadedMaterialResources ?? []).ToList();
 
         var sections = resources
+            .Where(r => r.LoadedShaderMapLegacy != null)
             .Select(r => DecompileOneResource(material, r.LoadedShaderMapLegacy!))
+            .Concat(resources
+                .Where(r => r.LoadedShaderMapLegacy == null && r.LoadedShaderMap != null)
+                .Select(r => DecompileOneModernResource(material, r.LoadedShaderMap!)))
             .Where(s => !string.IsNullOrEmpty(s));
         var combined = string.Join("\n\n", sections);
         return string.IsNullOrEmpty(combined) ? null : combined;
+    }
+
+    /// <summary>
+    /// The 4.25+ counterpart of <see cref="DecompileOneResource"/>. The compiled pixel shader is found
+    /// and decoded exactly the same way - only the shader map's own container format differs (a frozen
+    /// memory image rather than the legacy serialized map) and the constant-buffer rows resolve to
+    /// preshader opcode ranges rather than to a uniform expression tree.
+    /// </summary>
+    private static string? DecompileOneModernResource(UMaterialInterface material, FMaterialShaderMap shaderMap)
+    {
+        if (shaderMap.Content is not FMaterialShaderMapContent { MaterialCompilationOutput.UniformExpressionSet: { } expressionSet })
+            return null;
+
+        var id = shaderMap.ShaderMapId;
+        var header = $"// {material.Name} | {shaderMap.ShaderPlatform} | Quality={id.QualityLevel} FeatureLevel={id.FeatureLevel}";
+
+        var chain = BuildInstanceChain(material);
+        var parameters = new CMaterialParams2();
+        for (var i = chain.Count - 1; i >= 0; i--)
+        {
+            try { chain[i].GetParams(parameters, EMaterialFormat.AllLayers); }
+            catch { /* best-effort - only used to pick the GBuffer/forward pin layout */ }
+        }
+        var usesGBuffer = parameters.BlendMode is EBlendMode.BLEND_Opaque or EBlendMode.BLEND_Masked;
+
+        var wiring = MaterialPixelShaderAnalyzer.Analyze(shaderMap, expressionSet, usesGBuffer,
+            CreateModernShaderCodeResolver(material, shaderMap));
+        if (!wiring.Success)
+            return $"{header}\n// pixel shader analysis failed - {wiring.FailureReason}";
+
+        var ctx = new PrintCtx(material, null, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material),
+            id.FeatureLevel, ELegacyShaderMapProfile.UE4_23);
+        return PrintWiring(wiring, ctx, header, null, new Dictionary<string, PixelExpressionNode>());
+    }
+
+    /// <summary>
+    /// Resolves this shader map's shaders out of the pak-cooked shared library by their in-map index,
+    /// or null when the map inlined its code (then the analyzer reads it straight out of the map).
+    /// </summary>
+    private static Func<int, byte[]?>? CreateModernShaderCodeResolver(UMaterialInterface material, FMaterialShaderMap shaderMap)
+    {
+        if (shaderMap.Code is { ShaderEntries.Length: > 0 }) return null;
+        if (shaderMap.ResourceHash is not { } resourceHash) return null;
+        if (material.Owner?.Provider is not { } provider) return null;
+
+        return resourceIndex => MaterialShaderLibrary.TryGetShaderCode(provider, resourceHash, resourceIndex, out _);
     }
 
     private static string? DecompileOneResource(UMaterialInterface material, FMaterialShaderMapLegacy shaderMap)
@@ -102,24 +150,6 @@ public static class PixelShaderDecompiler
 
         if (!wiring.Success)
             return $"{header}\n// pixel shader analysis failed - {wiring.FailureReason}";
-
-        var sb = new StringBuilder();
-        sb.Append(header).Append(" | ").Append(wiring.ShaderTypeName)
-            .Append(" | reconstructed from the compiled DXBC pixel shader").AppendLine();
-        sb.AppendLine();
-
-        // PinSources (the taint-analysis sink map) and PinExpressions (the separate expression-DAG
-        // builder) usually agree on which pins exist, but aren't guaranteed to - a shader with an
-        // unusual output-register layout (e.g. a single-target Unlit base pass instead of the full
-        // 4-target GBuffer) can make the sink-detection heuristic in MapSinksToPins come up empty for
-        // a pin that BuildPinExpressions still resolved correctly. Iterate the union of every source
-        // that names a pin so one detector's gap doesn't silently hide the other's result.
-        var orderedPins = wiring.PinSources.Keys
-            .Concat(wiring.PinExpressions.Keys)
-            .Concat(wiring.PinDisassembly.Keys)
-            .Distinct()
-            .OrderBy(p => p, StringComparer.Ordinal)
-            .ToList();
 
         // The expression DAG hash-conses repeated subtrees (the same constant-buffer read or the
         // same sub-computation can be reached from many places, e.g. a shared UV computation feeding
@@ -152,7 +182,37 @@ public static class PixelShaderDecompiler
             // auxiliary - never fail the pixel-shader decompile over this
         }
 
-        var ctx = new PrintCtx(material, expressionSet, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel, shaderMap.ParsedProfile);
+        var ctx = new PrintCtx(material, expressionSet, null, MaterialShaderDecompiler.GetReferencedTextures(material), id.FeatureLevel, shaderMap.ParsedProfile);
+        return PrintWiring(wiring, ctx, header, worldPositionOffset, vertexInterpolants);
+    }
+
+    /// <summary>
+    /// Turns a recovered <see cref="PixelShaderWiring"/> into the printed pseudocode listing: the CSE
+    /// pass over the shared expression DAG, then one line per output pin. Shared by the legacy and
+    /// 4.25+ paths - by this point the two differ only in how <paramref name="ctx"/> resolves a
+    /// constant-buffer read back to a named uniform, which PrintCtx itself handles.
+    /// </summary>
+    private static string PrintWiring(PixelShaderWiring wiring, PrintCtx ctx, string header,
+        PixelExpressionNode? worldPositionOffset, IReadOnlyDictionary<string, PixelExpressionNode> vertexInterpolants)
+    {
+        var sb = new StringBuilder();
+        sb.Append(header).Append(" | ").Append(wiring.ShaderTypeName)
+            .Append(" | reconstructed from the compiled DXBC pixel shader").AppendLine();
+        sb.AppendLine();
+
+        // PinSources (the taint-analysis sink map) and PinExpressions (the separate expression-DAG
+        // builder) usually agree on which pins exist, but aren't guaranteed to - a shader with an
+        // unusual output-register layout (e.g. a single-target Unlit base pass instead of the full
+        // 4-target GBuffer) can make the sink-detection heuristic in MapSinksToPins come up empty for
+        // a pin that BuildPinExpressions still resolved correctly. Iterate the union of every source
+        // that names a pin so one detector's gap doesn't silently hide the other's result.
+        var orderedPins = wiring.PinSources.Keys
+            .Concat(wiring.PinExpressions.Keys)
+            .Concat(wiring.PinDisassembly.Keys)
+            .Distinct()
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+
         var recursed = new HashSet<PixelExpressionNode>(ReferenceEqualityComparer.Instance);
         foreach (var pin in orderedPins)
             if (wiring.PinExpressions.TryGetValue(pin, out var root))
@@ -297,10 +357,78 @@ public static class PixelShaderDecompiler
     /// shared) expression DAG so a subtree reached from many places is declared once and referenced
     /// by name everywhere else, instead of being fully re-expanded at every occurrence.
     /// </summary>
-    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy expressionSet, IReadOnlyList<UTexture?>? referencedTextures, ERHIFeatureLevel featureLevel, ELegacyShaderMapProfile legacyProfile)
+    private sealed class PrintCtx(UMaterialInterface material, FUniformExpressionSetLegacy? expressionSet, FUniformExpressionSet? modernExpressionSet, IReadOnlyList<UTexture?>? referencedTextures, ERHIFeatureLevel featureLevel, ELegacyShaderMapProfile legacyProfile)
     {
         public readonly UMaterialInterface Material = material;
-        public readonly FUniformExpressionSetLegacy ExpressionSet = expressionSet;
+        /// <summary>Set for a pre-4.25 resource; <see cref="ModernExpressionSet"/> is set instead for 4.25+.</summary>
+        public readonly FUniformExpressionSetLegacy? ExpressionSet = expressionSet;
+        public readonly FUniformExpressionSet? ModernExpressionSet = modernExpressionSet;
+        public readonly EGame Game = material.Owner?.Provider?.Versions.Game ?? EGame.GAME_UE4_LATEST;
+
+        /// <summary>The GUIDs of the Material Parameter Collections this resource references, in either format.</summary>
+        public FGuid[] ParameterCollections =>
+            ExpressionSet?.ParameterCollections ?? ModernExpressionSet?.ParameterCollections ?? [];
+
+        /// <summary>
+        /// Names one row of the material constant buffer. Pre-4.25 that row is a uniform expression
+        /// tree; 4.25+ it is a preshader opcode range, decompiled by
+        /// <see cref="MaterialPreshaderDecompiler"/>. Returns null when this resource's format has no
+        /// entry at that index, so callers keep their raw fallback label.
+        /// </summary>
+        public string? DescribeUniform(int index, bool vector)
+        {
+            if (ExpressionSet is { } legacy)
+            {
+                var expressions = vector ? legacy.UniformVectorExpressions : legacy.UniformScalarExpressions;
+                return index >= 0 && index < expressions.Length
+                    ? MaterialShaderDecompiler.PrintExpression(expressions[index], ReferencedTextures, Overrides)
+                    : null;
+            }
+            if (ModernExpressionSet is { } modern)
+            {
+                var preshaders = vector ? modern.UniformVectorPreshaders : modern.UniformScalarPreshaders;
+                if (preshaders == null || index < 0 || index >= preshaders.Length) return null;
+                return MaterialPreshaderDecompiler.Decompile(modern, preshaders[index], Game, ReferencedTextures, Overrides);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Names a sampled texture by the (Slot, Index) pair the analyzer resolved it to. 4.25+ keeps
+        /// the parameter name and referenced-texture index in FMaterialTextureParameterInfo directly,
+        /// so no expression tree walk is needed there.
+        /// </summary>
+        public string? DescribeTextureBinding(int slot, int index)
+        {
+            if (ExpressionSet is { } legacy)
+            {
+                var array = slot switch
+                {
+                    0 => legacy.Uniform2DTextureExpressions,
+                    1 => legacy.UniformCubeTextureExpressions,
+                    3 => legacy.UniformVolumeTextureExpressions,
+                    4 => legacy.UniformVirtualTextureExpressions,
+                    _ => null,
+                };
+                return array != null && index >= 0 && index < array.Length
+                    ? MaterialShaderDecompiler.PrintExpression(array[index], ReferencedTextures, Overrides)
+                    : null;
+            }
+            if (ModernExpressionSet?.UniformTextureParameters is { } parameters &&
+                slot >= 0 && slot < parameters.Length && parameters[slot] is { } slotParameters &&
+                index >= 0 && index < slotParameters.Length)
+            {
+                var parameter = slotParameters[index];
+                var name = MaterialPreshaderDecompiler.GetParameterName(parameter);
+                if (name != null && Overrides.Textures.TryGetValue(name, out var overridden) && overridden != null)
+                    return overridden.Name;
+                if (ReferencedTextures is { } textures && parameter.TextureIndex >= 0 && parameter.TextureIndex < textures.Count &&
+                    textures[parameter.TextureIndex] is { } texture)
+                    return texture.Name;
+                return name;
+            }
+            return null;
+        }
         public readonly IReadOnlyList<UTexture?>? ReferencedTextures = referencedTextures;
         public readonly ERHIFeatureLevel FeatureLevel = featureLevel;
         public readonly ELegacyShaderMapProfile LegacyProfile = legacyProfile;
@@ -389,19 +517,27 @@ public static class PixelShaderDecompiler
     {
         name = "";
         if (node.Source is not { Kind: PixelValueKind.Texture } source) return false;
-        var array = source.TextureSlot switch
+        if (ctx.ExpressionSet is { } legacy)
         {
-            0 => ctx.ExpressionSet.Uniform2DTextureExpressions,
-            1 => ctx.ExpressionSet.UniformCubeTextureExpressions,
-            3 => ctx.ExpressionSet.UniformVolumeTextureExpressions,
-            4 => ctx.ExpressionSet.UniformVirtualTextureExpressions,
-            _ => null,
-        };
-        if (array == null || source.Index < 0 || source.Index >= array.Length) return false;
-        var resolved = MaterialShaderDecompiler.TryResolveTextureIdentifier(array[source.Index], ctx.ReferencedTextures);
-        if (resolved == null) return false;
-        name = resolved;
-        return true;
+            var array = source.TextureSlot switch
+            {
+                0 => legacy.Uniform2DTextureExpressions,
+                1 => legacy.UniformCubeTextureExpressions,
+                3 => legacy.UniformVolumeTextureExpressions,
+                4 => legacy.UniformVirtualTextureExpressions,
+                _ => null,
+            };
+            if (array == null || source.Index < 0 || source.Index >= array.Length) return false;
+            var resolved = MaterialShaderDecompiler.TryResolveTextureIdentifier(array[source.Index], ctx.ReferencedTextures);
+            if (resolved == null) return false;
+            name = resolved;
+            return true;
+        }
+
+        // 4.25+: the binding already carries its own name, so it needs no identifier extraction
+        if (ctx.DescribeTextureBinding(source.TextureSlot, source.Index) is not { } modernName) return false;
+        name = SanitizeIdentifier(modernName);
+        return name.Length > 0;
     }
 
     /// <summary>
@@ -599,16 +735,11 @@ public static class PixelShaderDecompiler
 
     private static string DescribeSource(PixelValueSource source, PrintCtx ctx) => source.Kind switch
     {
-        PixelValueKind.VectorExpression => ResolveUniform(ctx.ExpressionSet.UniformVectorExpressions, source.Index, "UniformVector", ctx),
-        PixelValueKind.ScalarExpression => ResolveUniform(ctx.ExpressionSet.UniformScalarExpressions, source.Index, "UniformScalar", ctx),
+        PixelValueKind.VectorExpression => ctx.DescribeUniform(source.Index, true) ?? $"UniformVector{source.Index} /* out of range */",
+        PixelValueKind.ScalarExpression => ctx.DescribeUniform(source.Index, false) ?? $"UniformScalar{source.Index} /* out of range */",
         PixelValueKind.Texture => DescribeTexture(source, ctx),
         _ => $"Uniform[{source.Index}]",
     };
-
-    private static string ResolveUniform(FMaterialUniformExpressionLegacy[] expressions, int index, string fallbackPrefix, PrintCtx ctx)
-        => index >= 0 && index < expressions.Length
-            ? MaterialShaderDecompiler.PrintExpression(expressions[index], ctx.ReferencedTextures, ctx.Overrides)
-            : $"{fallbackPrefix}{index} /* out of range */";
 
     /// <summary>
     /// A sampled texture's (Slot, Index) pair comes straight out of the analyzer's own
@@ -622,18 +753,8 @@ public static class PixelShaderDecompiler
     /// </summary>
     private static string DescribeTexture(PixelValueSource source, PrintCtx ctx)
     {
-        var array = source.TextureSlot switch
-        {
-            0 => ctx.ExpressionSet.Uniform2DTextureExpressions,
-            1 => ctx.ExpressionSet.UniformCubeTextureExpressions,
-            3 => ctx.ExpressionSet.UniformVolumeTextureExpressions,
-            4 => ctx.ExpressionSet.UniformVirtualTextureExpressions,
-            _ => null,
-        };
-
-        var name = array != null && source.Index >= 0 && source.Index < array.Length
-            ? MaterialShaderDecompiler.PrintExpression(array[source.Index], ctx.ReferencedTextures, ctx.Overrides)
-            : $"Texture[slot={source.TextureSlot}, index={source.Index}]";
+        var name = ctx.DescribeTextureBinding(source.TextureSlot, source.Index)
+                   ?? $"Texture[slot={source.TextureSlot}, index={source.Index}]";
         return source.Channel >= 0 ? $"{name}.{"rgba"[source.Channel]}" : name;
     }
 
@@ -682,13 +803,13 @@ public static class PixelShaderDecompiler
         }
 
         var foreignMatch = ForeignCbPattern.Match(detail);
-        if (foreignMatch.Success && ctx.ExpressionSet.ParameterCollections.Length > 0)
+        if (foreignMatch.Success && ctx.ParameterCollections.Length > 0)
         {
             var register = int.Parse(foreignMatch.Groups["n"].Value);
             var row = int.Parse(foreignMatch.Groups["row"].Value);
             if (!ctx.LeftoverCbRegisterToCollectionIndex.TryGetValue(register, out var n))
             {
-                if (ctx.LeftoverCbRegisterToCollectionIndex.Count >= ctx.ExpressionSet.ParameterCollections.Length) return false;
+                if (ctx.LeftoverCbRegisterToCollectionIndex.Count >= ctx.ParameterCollections.Length) return false;
                 n = ctx.LeftoverCbRegisterToCollectionIndex.Count;
                 ctx.LeftoverCbRegisterToCollectionIndex[register] = n;
             }
@@ -701,10 +822,10 @@ public static class PixelShaderDecompiler
     private static bool TryDescribeCollectionRow(int n, int row, PrintCtx ctx, out string result)
     {
         result = "";
-        if (n < 0 || n >= ctx.ExpressionSet.ParameterCollections.Length) return false;
+        if (n < 0 || n >= ctx.ParameterCollections.Length) return false;
 
         if (!ctx.CollectionCache.TryGetValue(n, out var collection))
-            ctx.CollectionCache[n] = collection = MaterialParameterCollectionResolver.Resolve(ctx.Material, ctx.ExpressionSet.ParameterCollections[n]);
+            ctx.CollectionCache[n] = collection = MaterialParameterCollectionResolver.Resolve(ctx.Material, ctx.ParameterCollections[n]);
         if (collection == null || !collection.Slots.TryGetValue(row, out var slot)) return false;
 
         if (slot.VectorName != null)

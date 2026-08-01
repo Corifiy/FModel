@@ -723,9 +723,10 @@ app — confirmed working (real hash → offset/size/frequency entries, matching
 
 ## Known limitations / explicitly out of scope
 
-- **UE 4.25+ preshader bytecode** (`FMaterialPreshaderData`, used by `LoadedShaderMap` instead of
-  `LoadedShaderMapLegacy`) is not decoded by either layer. See Layer 1's note above for why the
-  sibling project's decoder for it wasn't a shortcut here either.
+- ~~**UE 4.25+ preshader bytecode**~~ — now supported for 4.26/4.27, see "UE 4.26 support" below.
+  UE5's preshader encoding (different opcode set, operand widths and name interning) is still not
+  decoded; `MaterialPreshaderDecompiler.IsSupported` gates it and those resources say so instead of
+  being decoded into something plausible-looking but wrong.
 - **DXIL/UE5 SM6 path** (`MaterialDxil.cs`, `AnalyzeDxil`) was ported but never exercised.
 - **Shader-permutation selection is not domain-aware.** `AnalyzeLegacy`'s candidate selection picks
   a "representative" base-pass-shaped shader rather than the permutation actually used for the
@@ -1112,6 +1113,81 @@ for the plain `TUniformLightMapPolicy`-based policies (`BasePassPixelPolicyParam
 mapped to 1 field) — the three `FSelfShadowed*` policies use a different `PixelParametersType` not yet
 confirmed for 4.19, and would need the same kind of investigation if one turns up as the shader a
 future asset actually needs reconstructed.
+
+## UE 4.26 support
+
+Added in a later session, for Fortnite 14.40. **Both layers work.** Unlike the 4.19 work, this needed
+no new bytecode analysis: 4.25 moved the shader map into a frozen memory image but kept the compiled
+pixel shader as ordinary DXBC, so the whole Layer 2 pipeline is reused unchanged. What was missing was
+the plumbing around it.
+
+### Environment
+
+- Build: `V:\.builds\.project.specific\++Fortnite+Release-14.40-CL-14550713-Windows\FortniteGame\Content\Paks`
+- Game version: `EGame.GAME_UE4_26`, mappings required (unversioned properties)
+- AES key: `0xAB32BAB083F7D923A33AA768BC64B64BF62488948BD49FE61D95343492252558`
+- Engine source for ground truth: `D:\Unreal Engine\UE_4.25`, `UE_4.26`, `UE_4.27` (all three consulted
+  — several of the questions below are exactly "did this change *within* the 4.26 cycle")
+- Test assets: `.../Landscape/Materials/M_Apollo_Roads_Master` and `MI_Apollo_Roads_Straight`
+
+### What had to be fixed first: LoadedMaterialResources parsed empty
+
+Nothing decompiles if the shader map doesn't parse. Fortnite 14.40 is a 4.26 branch cut *before* the
+RDG uniform buffer rework, so it carries every other 4.26 memory-image change but still writes the 4.25
+shape for `FShaderParameterBindings` (no `GraphUniformBuffers`) and `FRHIUniformBufferLayoutInitializer`
+(no graph resource arrays). Both are now detected by parse-retry — see
+`FShaderMapBase.DeserializeContent`, the `ShaderMap.HasRDGUniformBuffers` option, and
+`FMemoryImageArchive.bHasRDGUniformBuffers`. 16.40 (later in the same branch) already has the field, so
+this is genuinely a mid-cycle change and not a version boundary.
+
+### Layer 1 — preshaders (`MaterialPreshaderDecompiler`, CUE4Parse)
+
+4.25 replaced the symbolic `FMaterialUniformExpression` tree with a flat stack machine: one shared
+`FMaterialPreshaderData` byte array, and every CPU-folded uniform value is an opcode range inside it.
+The decoder walks it exactly the way `EvaluatePreshader` (`MaterialUniformExpressions.cpp:956`) does —
+same opcodes, same operand widths — but pushes printed expressions instead of `FLinearColor`s.
+`EMaterialPreshaderOpcode` is byte-identical across 4.25/4.26/4.27 (checked in all three).
+
+This is *better* than the legacy tree in one respect: `ScalarParameter`/`VectorParameter` carry an index
+into `UniformScalarParameters`/`UniformVectorParameters`, which serialize the real parameter name and
+the base material's default — so names come straight from the cook and are never inferred.
+
+### Layer 2 — pixel shader DXBC
+
+Three pieces:
+
+1. `MaterialShaderLibrary` (new) resolves shader code out of the pak-cooked **version 2**
+   (`FSerializedShaderArchive`) `.ushaderbytecode` library: `ResourceHash` selects the shadermap entry,
+   `FShader.ResourceIndex` selects within its slice of `ShaderIndices`, LZ4 per entry
+   (`ShaderCodeArchive.cpp`'s `ShaderLibraryCompressionFormat`). Only headers are parsed and cached;
+   code is a ranged read, because Fortnite 14.40's library is ~820 MB.
+2. `MaterialPixelShaderAnalyzer.Analyze` (the modern entry point that was ported but never exercised —
+   it required inlined code) now takes that resolver. Its cb-layout math already matched 4.25+
+   (`FUniformExpressionSet::CreateBufferStruct`: VT page tables, VT constants, one float4 per vector
+   preshader, scalars packed 4/float4).
+3. `PixelShaderDecompiler` handles `LoadedShaderMap` resources alongside `LoadedShaderMapLegacy`, and
+   `PrintCtx` resolves a cb row through whichever format the resource has. Printing, CSE, texture
+   naming, MPC resolution and the pin listing are shared verbatim.
+
+### Verified
+
+`MI_Apollo_Roads_Straight`/`M_Apollo_Roads_Master` reconstruct all seven GBuffer pins (Base_Color,
+Normal, Roughness, Specular, Metallic, Emissive_Color, Ambient_Occlusion) from
+`TBasePassPSFNoLightMapPolicy`. On an ordinary (non-RVT) material such as `M_Space_Satellite` the DAG
+resolves named leaves throughout — `ScalarParameter'SpecRoughnessMin'`, `TextureParameter'Diffuse'`,
+`VectorParameter'Emissive Multiplier' /* float4(0.14, 0.6062, 1, 1), default float4(1, 1, 1, 1) */`
+(instance override *and* base default), plus the recovered tangent basis. The 4.23 (10.40) and 4.19
+paths were re-run unchanged after the refactor.
+
+### Known gaps in this path
+
+- **View/Primitive rows stay unnamed** (`/* View cb0[46] */ 0`). The buffer *name* resolves (via the
+  hashed-name table), but `EngineUniformBufferLayout`'s row tables describe the 4.23 and 4.19 member
+  layouts; using them for 4.26 would confidently print the wrong field. Naming these needs a 4.26 table.
+- **WorldPositionOffset and vertex-computed interpolants are not recovered** for 4.25+ — those helpers
+  (`FindWorldPositionOffset`, `FindVertexShaderComputedInterpolants`) are still legacy-map-typed.
+- **UE5** is untouched: its preshader encoding differs, and its DXIL path (`AnalyzeDxil`) remains
+  ported-but-unexercised.
 
 ## Test harness
 

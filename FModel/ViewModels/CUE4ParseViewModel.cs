@@ -1702,9 +1702,10 @@ public class CUE4ParseViewModel : ViewModel
         if (string.IsNullOrEmpty(shader))
         {
             TabControl.SelectedTab.SetDocumentText(
-                "// No legacy (pre-4.25) shader data found for this asset.\n" +
-                "// Either this isn't a Material/MaterialInstance, or it was cooked with an\n" +
-                "// engine version whose preshader bytecode format (4.25+) isn't decompiled yet.",
+                "// No shader data found for this asset.\n" +
+                "// Either this isn't a Material/MaterialInstance, it was cooked without inline\n" +
+                "// shader maps, or its engine version's format isn't decompiled yet (pre-4.25 and\n" +
+                "// 4.26/4.27 are; UE5's preshader encoding is not).",
                 false, false);
             return false;
         }
