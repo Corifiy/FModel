@@ -105,6 +105,8 @@ Please rewrite it as simple, readable C++-style code:
 Important: do not invent math that isn't there. If something is unclear or unresolved
 (like a bare cb0[66] or Texture[9]), say so instead of guessing.
 
+Ignore "SelectionColor", that is added in by the engine.
+
 <paste the decompiled shader here>
 ```
 
@@ -161,6 +163,7 @@ The shader you're reading is what the compiler *actually produced*, after optimi
 - **Unused parameters vanish.** A parameter nothing reads is dead code and gets removed.
 - Some math gets rearranged into an equivalent-but-different form. It computes the same result, it
   just may not look like how the artist wired it.
+- **SelectionColor** is not apart of the actual material.
 
 ### Things FModel honestly can't resolve
 
