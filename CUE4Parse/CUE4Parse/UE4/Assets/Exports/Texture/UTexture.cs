@@ -153,6 +153,11 @@ public abstract class UTexture : UUnrealMaterial, IAssetUserData
         writer.WritePropertyName("SizeY");
         writer.WriteValue(PlatformData.SizeY);
 
+        // Cubemap and volume slices are stacked vertically into SizeY, so consumers need the slice
+        // count to unfold them again. PackedData can't be used for that, volumes overwrite it with 1.
+        writer.WritePropertyName("SizeZ");
+        writer.WriteValue(PlatformData.SizeZ);
+
         writer.WritePropertyName("PackedData");
         writer.WriteValue(PlatformData.PackedData);
 

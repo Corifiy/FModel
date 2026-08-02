@@ -44,6 +44,9 @@ public class FTexturePlatformData
 
     public readonly int SizeX;
     public int SizeY;
+    // How many slices got folded into SizeY: 1 for a simple texture, 6 for a cubemap, the depth for a volume.
+    // PackedData is rewritten for volumes below, so this is the only place the real depth survives.
+    public int SizeZ = 1;
     public readonly uint PackedData; // NumSlices: 1 for simple texture, 6 for cubemap - 6 textures are joined into one
     public readonly string PixelFormat;
     public readonly FOptTexturePlatformData OptData;
@@ -144,6 +147,11 @@ public class FTexturePlatformData
             {
                 var slices = GetNumSlices();
                 if (Ar.Game == EGame.GAME_Borderlands4) slices = slices != 1 ? slices >> 1 : 1;
+                // A volume's depth shrinks with every mip and is written on the mip itself.
+                // PackedData's slice count doesn't always agree, and it's the mip that matches
+                // the payload. Mip SizeZ only exists from 4.20 on, hence the fallback.
+                if (Owner is UVolumeTexture && Mips[i].SizeZ > 1) slices = Mips[i].SizeZ;
+                if (i == 0) SizeZ = slices;
                 Mips[i].SizeY *= slices;
                 Mips[i].SizeZ = Mips[i].SizeZ == slices ? 1 : Mips[i].SizeZ;
             }
