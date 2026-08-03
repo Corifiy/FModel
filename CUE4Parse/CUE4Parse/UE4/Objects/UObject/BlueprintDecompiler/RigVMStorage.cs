@@ -30,6 +30,33 @@ internal abstract class RigVMStorage
 
     protected abstract string? GetOffsetSuffix(FRigVMOperand operand);
 
+    /// <summary>The path into a register an operand addresses, or null when it addresses the whole thing.</summary>
+    protected virtual string? GetSegmentPath(FRigVMOperand operand) => null;
+
+    /// <summary>
+    /// An operand can address one member of a literal rather than the whole of it - the compiler copies a
+    /// struct constant a field at a time - so the value worth printing is that member's, not the struct it was
+    /// cut from. Falls back to the whole value for a shape this cannot walk, which loses nothing.
+    /// </summary>
+    protected FPropertyTag ResolveSegment(FPropertyTag property, FRigVMOperand operand)
+    {
+        var segmentPath = GetSegmentPath(operand);
+        if (string.IsNullOrEmpty(segmentPath)) return property;
+
+        var current = property;
+        foreach (var segment in segmentPath.Split(['/', '.'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if ((current.Tag?.GenericValue as FScriptStruct)?.StructType is not FStructFallback members) return property;
+
+            var member = members.Properties.FirstOrDefault(candidate => candidate.Name.Text == segment);
+            if (member is null) return property;
+
+            current = member;
+        }
+
+        return current;
+    }
+
     public string FormatOperand(FRigVMOperand operand)
     {
         var name = GetRegisterName(operand);
@@ -197,17 +224,12 @@ internal abstract class RigVMStorage
         // so they read as C++ initialisers rather than an internal type description. These carry real authored
         // data - the bone a node drives, its offset - so the budget is generous; only a genuinely unwieldy
         // list collapses, and then to a count rather than nothing.
+        // A struct or an array keeps the layout it was rendered with - one field per line. These carry the
+        // authored substance of a rig (the bone a node drives, the offset it applies), and collapsing them
+        // onto one line to save space is what made them unreadable; the caller lifts anything multi-line out
+        // of the argument list into a statement of its own.
         if (property.Tag is not null && BlueprintDecompilerUtils.GetPropertyTagVariable(property, out _, out var rendered) && rendered.Length > 0)
-        {
-            var singleLine = string.Join(' ', rendered.Split('\n').Select(line => line.Trim()));
-
-            // A bone list with its per-bone offsets is the substance of a rig, so it is never summarised away.
-            // Past the point where it still reads on one line it keeps its original layout instead, and the
-            // caller lifts it out of the node's comment into a statement of its own. The budget is small on
-            // purpose: a couple of fields still read fine inline, but a nest of filters or weighted parents
-            // crammed onto one line stops being something anyone can follow.
-            return singleLine.Length <= 100 ? singleLine : rendered.TrimEnd();
-        }
+            return rendered.TrimEnd();
 
         return "default";
     }
@@ -344,14 +366,16 @@ internal abstract class RigVMStorage
         {
             if (RegisterAt(operand) is not { } register) return "<unresolved>";
             return _literalValues.TryGetValue(register.RawName, out var property)
-                ? FormatPropertyValue(property, pinName)
+                ? FormatPropertyValue(ResolveSegment(property, operand), pinName)
                 : "default";
         }
 
-        protected override string? GetOffsetSuffix(FRigVMOperand operand) =>
+        protected override string? GetSegmentPath(FRigVMOperand operand) =>
             _propertyPaths.TryGetValue(operand.MemoryType, out var paths) && operand.RegisterOffset < paths.Length
-                ? FormatSegmentPath(paths[operand.RegisterOffset].SegmentPath)
+                ? paths[operand.RegisterOffset].SegmentPath
                 : null;
+
+        protected override string? GetOffsetSuffix(FRigVMOperand operand) => FormatSegmentPath(GetSegmentPath(operand));
     }
 
     /// <summary>
@@ -412,7 +436,7 @@ internal abstract class RigVMStorage
 
             // The CDO is keyed by the raw generated property names.
             if (_literalValues.TryGetValue(register.RawName, out var property))
-                return FormatPropertyValue(property, pinName);
+                return FormatPropertyValue(ResolveSegment(property, operand), pinName);
 
             // Unversioned property serialization omits anything still equal to its type default, so a literal
             // that is missing from the CDO is not unknown - it is the default, which is worth naming outright.
@@ -450,14 +474,16 @@ internal abstract class RigVMStorage
             };
         }
 
+        protected override string? GetSegmentPath(FRigVMOperand operand) =>
+            operand.MemoryType == ERigVMMemoryType.Work && operand.RegisterOffset < _workPropertyPaths.Length
+                ? _workPropertyPaths[operand.RegisterOffset].SegmentPath
+                : null;
+
         protected override string? GetOffsetSuffix(FRigVMOperand operand)
         {
-            if (operand.MemoryType != ERigVMMemoryType.Work || operand.RegisterOffset >= _workPropertyPaths.Length)
-                return null;
-
             // UE 5.0 stores the segment path as text, so the sub-pin name needs no reconstruction - only
             // the array steps, which arrive as bare numbers ("BoneToModify/0/Transform"), need subscripting.
-            var segmentPath = _workPropertyPaths[operand.RegisterOffset].SegmentPath;
+            var segmentPath = GetSegmentPath(operand);
             if (string.IsNullOrEmpty(segmentPath)) return null;
 
             var suffix = new StringBuilder();

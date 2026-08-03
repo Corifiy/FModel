@@ -929,6 +929,25 @@ public static class BlueprintDecompilerUtils
     private static bool GetPropertyTagVariable(FScriptStruct scriptStruct, out string value) =>
         GetPropertyTagVariable(scriptStruct.StructType, out value);
 
+    /// <summary>
+    /// A transform serialises rotation first, but every place a person meets one - the details panel, a pin,
+    /// the viewport gizmo - puts the position first and the rotation after it. Reading order follows that,
+    /// since these are numbers someone is going to compare against the editor. Any other struct is left in
+    /// the order it was declared, which is the order its own fields are meant to be read in.
+    /// </summary>
+    private static IReadOnlyList<FPropertyTag> OrderStructMembers(List<FPropertyTag> properties)
+    {
+        var rotation = properties.FindIndex(property => property.Name.Text == "Rotation");
+        var translation = properties.FindIndex(property => property.Name.Text == "Translation");
+        if (rotation < 0 || translation < 0 || translation < rotation) return properties;
+
+        var ordered = new List<FPropertyTag>(properties);
+        ordered.RemoveAt(translation);
+        ordered.Insert(rotation, properties[translation]);
+
+        return ordered;
+    }
+
     private static bool GetPropertyTagVariable(IUStruct uStruct, out string value)
     {
         value = string.Empty;
@@ -943,13 +962,14 @@ public static class BlueprintDecompilerUtils
                 }
                 else
                 {
+                    var properties = OrderStructMembers(fallback.Properties);
                     var stringBuilder = new CustomStringBuilder();
                     stringBuilder.OpenBlock();
-                    for (int i = 0; i < fallback.Properties.Count; i++)
+                    for (int i = 0; i < properties.Count; i++)
                     {
-                        var property = fallback.Properties[i];
+                        var property = properties[i];
                         GetPropertyTagVariable(property, out string _, out string tagValue);
-                        bool isLast = i == fallback.Properties.Count - 1;
+                        bool isLast = i == properties.Count - 1;
                         stringBuilder.AppendLine($"\"{property.Name}\": {tagValue}{(isLast ? "" : ",")}");
                     }
 
@@ -1028,12 +1048,11 @@ public static class BlueprintDecompilerUtils
             }
             case FQuat fQuat:
             {
-                var x = fQuat.X;
-                var y = fQuat.Y;
-                var z = fQuat.Z;
-                var w = fQuat.W;
+                // Nobody authors a rotation as four components, and the editor never shows one that way, so it
+                // is printed as the euler angles it stands for - the same numbers a rotator pin displays.
+                var rotator = fQuat.Rotator();
 
-                value = $"FQuat({x}, {y}, {z}, {w})";
+                value = $"FRotator({rotator.Pitch}, {rotator.Yaw}, {rotator.Roll})";
                 break;
             }
             case FBox box:
