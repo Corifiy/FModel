@@ -105,7 +105,7 @@ public class FInstancedPropertyBag : IUStruct
         for (var i = 0; i < PropertyDescs.Length; i++)
         {
             var desc = PropertyDescs[i];
-            var propertyType = BuildPropertyType(desc.ValueType, desc.ValueTypeObject);
+            var propertyType = BuildPropertyType(Ar, desc.ValueType, desc.ValueTypeObject);
 
             // Containers wrap the value type, outermost last, so they are applied in reverse. Older versions
             // stored a single container in ContainerType; newer ones use the ContainerTypes list.
@@ -122,7 +122,29 @@ public class FInstancedPropertyBag : IUStruct
         return new Struct(Ar.Owner?.Mappings, nameof(FInstancedPropertyBag), null, properties, PropertyDescs.Length);
     }
 
-    private static PropertyType BuildPropertyType(EPropertyBagPropertyType valueType, FPackageIndex? valueTypeObject) => valueType switch
+    /// <summary>
+    /// A bag can hold a type that was authored as an asset rather than declared in C++ - a user-defined struct
+    /// or enum - and those never appear in the mappings, which only carry native types. The descriptor points
+    /// at the asset, so it is loaded and handed to the reader directly, the same way the tagged path builds a
+    /// schema from a UStruct. Without it a single such property makes the whole payload unreadable, since the
+    /// values are one packed stream with no way to resume past a member that could not be sized.
+    /// </summary>
+    private static PropertyType BuildAssetType(FAssetArchive Ar, string type, FPackageIndex? valueTypeObject)
+    {
+        var name = valueTypeObject?.Name;
+        var propertyType = type == "EnumProperty"
+            ? new PropertyType(type, enumName: name)
+            : new PropertyType(type, name);
+
+        if (name is null || Ar.Owner?.Mappings?.Types.ContainsKey(name) == true) return propertyType;
+
+        if (type == "EnumProperty") propertyType.Enum = valueTypeObject?.Load<UEnum>();
+        else propertyType.Struct = valueTypeObject?.Load<UStruct>();
+
+        return propertyType;
+    }
+
+    private static PropertyType BuildPropertyType(FAssetArchive Ar, EPropertyBagPropertyType valueType, FPackageIndex? valueTypeObject) => valueType switch
     {
         EPropertyBagPropertyType.Bool => new PropertyType("BoolProperty", b: false),
         EPropertyBagPropertyType.Byte => new PropertyType("ByteProperty"),
@@ -135,8 +157,8 @@ public class FInstancedPropertyBag : IUStruct
         EPropertyBagPropertyType.Name => new PropertyType("NameProperty"),
         EPropertyBagPropertyType.String => new PropertyType("StrProperty"),
         EPropertyBagPropertyType.Text => new PropertyType("TextProperty"),
-        EPropertyBagPropertyType.Enum => new PropertyType("EnumProperty", enumName: valueTypeObject?.Name),
-        EPropertyBagPropertyType.Struct => new PropertyType("StructProperty", valueTypeObject?.Name),
+        EPropertyBagPropertyType.Enum => BuildAssetType(Ar, "EnumProperty", valueTypeObject),
+        EPropertyBagPropertyType.Struct => BuildAssetType(Ar, "StructProperty", valueTypeObject),
         EPropertyBagPropertyType.Object or EPropertyBagPropertyType.Class => new PropertyType("ObjectProperty"),
         EPropertyBagPropertyType.SoftObject => new PropertyType("SoftObjectProperty"),
         EPropertyBagPropertyType.SoftClass => new PropertyType("SoftClassProperty"),
