@@ -2170,6 +2170,69 @@ public static class BlueprintDecompilerUtils
         return parts.Count > 0 ? $"{{{string.Join(", ", parts)}}}" : null;
     }
 
+    private static readonly string[] _unitDefaultFieldNames = ["Scale3D", "Scale"];
+
+    /// <summary>
+    /// Renders a value the way the editor's own copy does, so an authored pin - a bone list, a transform -
+    /// can be pasted straight back onto the node instead of retyped field by field. UE reads this back with
+    /// ImportText, which leaves anything absent at its default, so members already at their default are
+    /// dropped: it is what the editor emits, and it keeps a nine-bone list to one readable line.
+    /// Rotations stay quaternions here rather than becoming rotators, because that is the form
+    /// FTransform's own text serialisation uses and it removes any question of which component is which.
+    /// </summary>
+    public static string? FormatT3D(object? value, string? fieldName = null)
+    {
+        switch (value)
+        {
+            case UScriptArray array:
+                return $"({string.Join(",", array.Properties.Select(element => FormatT3D(element.GenericValue) ?? "()"))})";
+            case FScriptStruct scriptStruct:
+                return FormatT3D(scriptStruct.StructType, fieldName);
+            case FStructFallback fallback:
+            {
+                var members = fallback.Properties
+                    .Select(property => (property.Name.Text, Value: FormatT3D(property.Tag?.GenericValue, property.Name.Text)))
+                    .Where(member => member.Value is not null)
+                    .Select(member => $"{member.Text}={member.Value}");
+                return $"({string.Join(",", members)})";
+            }
+
+            // A scale of one and a translation of zero are both "no value written", but they are different
+            // numbers, so the field decides which counts as untouched.
+            case FVector vector when _unitDefaultFieldNames.Contains(fieldName):
+                return vector is { X: 1, Y: 1, Z: 1 } ? null : FormatT3DVector(vector);
+            case FVector vector:
+                return vector is { X: 0, Y: 0, Z: 0 } ? null : FormatT3DVector(vector);
+            case FQuat quat:
+                return quat is { X: 0, Y: 0, Z: 0, W: 1 }
+                    ? null
+                    : $"(X={Round(quat.X)},Y={Round(quat.Y)},Z={Round(quat.Z)},W={Round(quat.W)})";
+            case FRotator rotator:
+                return rotator is { Pitch: 0, Yaw: 0, Roll: 0 }
+                    ? null
+                    : $"(Pitch={Round(rotator.Pitch)},Yaw={Round(rotator.Yaw)},Roll={Round(rotator.Roll)})";
+
+            // Enum values arrive qualified ("ERigElementType::Bone"); the text format wants the bare entry.
+            case FName enumValue when enumValue.Text.Contains("::"):
+                return enumValue.Text.SubstringAfterLast("::");
+            case FName name: return name.IsNone ? null : $"\"{name.Text}\"";
+            case string text: return $"\"{text}\"";
+            case bool flag: return flag ? "True" : null;
+            case float or double:
+                var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                return number == 0 ? null : Round(number);
+            case byte or sbyte or short or ushort or int or uint or long or ulong:
+                var integer = value.ToString()!;
+                return integer == "0" ? null : integer;
+            default: return null;
+        }
+    }
+
+    private static string Round(double value) => value.ToString("F6", CultureInfo.InvariantCulture);
+
+    private static string FormatT3DVector(FVector vector) =>
+        $"(X={Round(vector.X)},Y={Round(vector.Y)},Z={Round(vector.Z)})";
+
     // From SwitchedToRigVM (UE 4.25) the graph no longer bakes to a FControlRigOperator stream: it compiles
     // to RigVM bytecode on a URigVM object (serialized inline on the generated class and as a "VM" export).
     // Work/literal memory registers are named "<Node>.<Pin>", so the instruction stream fully describes the
@@ -2296,7 +2359,16 @@ public static class BlueprintDecompilerUtils
                             if (literalValue.Contains('\n'))
                             {
                                 var assignment = $"{nodeName}.{pin} = {literalValue};";
-                                if (!bulkLiterals.Contains(assignment)) bulkLiterals.Add(assignment);
+                                if (!bulkLiterals.Contains(assignment))
+                                {
+                                    bulkLiterals.Add(assignment);
+
+                                    // The same value in the editor's clipboard format. These lists are the
+                                    // authored substance of the rig and retyping one by hand is where the
+                                    // mistakes come from, so it goes out ready to paste onto the pin.
+                                    if (storage.FormatLiteralT3D(argument) is { Length: > 0 } clipboard)
+                                        bulkLiterals.Add($"// Paste onto the {pin} pin: {clipboard}");
+                                }
                                 callArguments.Add((pin, ownPin));
                                 continue;
                             }

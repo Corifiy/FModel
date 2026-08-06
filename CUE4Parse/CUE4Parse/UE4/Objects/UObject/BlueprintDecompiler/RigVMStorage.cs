@@ -28,6 +28,13 @@ internal abstract class RigVMStorage
 
     public abstract string FormatLiteralValue(FRigVMOperand operand, string? pinName);
 
+    /// <summary>
+    /// The same literal in the editor's clipboard format, for pins whose value is worth pasting back rather
+    /// than retyping. Null where the storage cannot reach a property tag - the pre-5.0 inline containers keep
+    /// raw register views rather than reflected values, and there is nothing to walk.
+    /// </summary>
+    public virtual string? FormatLiteralT3D(FRigVMOperand operand) => null;
+
     protected abstract string? GetOffsetSuffix(FRigVMOperand operand);
 
     /// <summary>The path into a register an operand addresses, or null when it addresses the whole thing.</summary>
@@ -370,6 +377,11 @@ internal abstract class RigVMStorage
                 : "default";
         }
 
+        public override string? FormatLiteralT3D(FRigVMOperand operand) =>
+            RegisterAt(operand) is { } register && _literalValues.TryGetValue(register.RawName, out var property)
+                ? BlueprintDecompilerUtils.FormatT3D(ResolveSegment(property, operand).Tag?.GenericValue)
+                : null;
+
         protected override string? GetSegmentPath(FRigVMOperand operand) =>
             _propertyPaths.TryGetValue(operand.MemoryType, out var paths) && operand.RegisterOffset < paths.Length
                 ? paths[operand.RegisterOffset].SegmentPath
@@ -442,6 +454,11 @@ internal abstract class RigVMStorage
             // that is missing from the CDO is not unknown - it is the default, which is worth naming outright.
             return FormatTypeDefault(register.Property);
         }
+
+        public override string? FormatLiteralT3D(FRigVMOperand operand) =>
+            RegisterAt(operand) is { } register && _literalValues.TryGetValue(register.RawName, out var property)
+                ? BlueprintDecompilerUtils.FormatT3D(ResolveSegment(property, operand).Tag?.GenericValue)
+                : null;
 
         /// <summary>
         /// Names the zero value a property falls back to when the package stores nothing for it. Enums are the
