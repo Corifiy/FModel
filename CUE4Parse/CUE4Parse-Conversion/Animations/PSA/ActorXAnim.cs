@@ -37,12 +37,20 @@ public class ActorXAnim
         {
             var boneInfo = anim.Skeleton.ReferenceSkeleton.FinalRefBoneInfo[boneIndex];
             var boneTransform = anim.Skeleton.ReferenceSkeleton.FinalRefBonePose[boneIndex];
+
+            var numChildren = 0;
+            for (var j = 0; j < numBones; j++)
+                if (j != boneIndex && anim.Skeleton.ReferenceSkeleton.FinalRefBoneInfo[j].ParentIndex == boneIndex)
+                    numChildren++;
+
             var bone = new FNamedBoneBinary
             {
                 Name = boneInfo.Name.Text,
                 Flags = 0, // reserved
-                NumChildren = 0, // unknown here
-                ParentIndex = boneInfo.ParentIndex, // unknown for UAnimSet?? edit 2023: no
+                NumChildren = numChildren,
+                // the root has no parent and the format has no way to say so, it points at itself.
+                // leaving the -1 through makes an importer index the last bone instead
+                ParentIndex = boneIndex > 0 ? boneInfo.ParentIndex : 0,
                 BonePos =
                 {
                     Orientation = boneTransform.Rotation,
@@ -51,6 +59,13 @@ public class ActorXAnim
                     Length = 1.0f
                 }
             };
+
+            // MIRROR_MESH, the keys below and ActorXMesh's bones are both mirrored, so this
+            // reference skeleton has to be too or the psa disagrees with itself and with the psk
+            bone.BonePos.Orientation.Y *= -1;
+            if (boneIndex == 0) bone.BonePos.Orientation.W *= -1; // because the importer has invert enabled by default...
+            bone.BonePos.Position.Y *= -1;
+
             bone.Serialize(Ar);
         }
 

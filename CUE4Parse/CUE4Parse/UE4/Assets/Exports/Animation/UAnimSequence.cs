@@ -362,18 +362,12 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
             return serializedByteStream;
         }
 
-        public bool IsValidAdditive()
-        {
-            if (AdditiveAnimType == EAdditiveAnimationType.AAT_None) return false;
-            return RefPoseType switch
-            {
-                EAdditiveBasePoseType.ABPT_RefPose => true,
-                EAdditiveBasePoseType.ABPT_AnimScaled => RefPoseSeq != null && RefPoseSeq.Name.Text != Name,
-                EAdditiveBasePoseType.ABPT_AnimFrame => RefPoseSeq != null && RefPoseSeq.Name.Text != Name && RefFrameIndex >= 0,
-                EAdditiveBasePoseType.ABPT_LocalAnimFrame => RefFrameIndex >= 0,
-                _ => false
-            };
-        }
+        /// <summary>
+        /// Whether the compressed data holds additive deltas instead of an absolute pose. Says nothing
+        /// about <see cref="RefPoseSeq"/>, which a cooked sequence often lacks or points at itself,
+        /// the base pose is resolved separately and falls back to the skeleton rest pose.
+        /// </summary>
+        public bool IsValidAdditive() => AdditiveAnimType != EAdditiveAnimationType.AAT_None;
 
         // WARNING: the following functions uses some logic to use either CompressedTrackToSkeletonMapTable or TrackToSkeletonMapTable.
         // This logic should be the same everywhere. Note: CompressedTrackToSkeletonMapTable appeared in UE4.12, so it will always be

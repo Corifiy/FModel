@@ -158,7 +158,6 @@ public class Skeleton : IDisposable
             {
                 bone.AnimatedBySequences.Add(s);
             }
-            sequence.RetargetTracks(animation.Skeleton);
         }
 
 #if DEBUG

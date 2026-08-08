@@ -104,6 +104,7 @@ namespace CUE4Parse_Conversion.Animations.PSA
                     y = keyCount - 1;
                     f = 0.0f;
                 }
+                if (x >= keyCount) x = keyCount - 1; // frame is at or past the end of the track
             }
             else Reset(out x, out y, out f);
         }

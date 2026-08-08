@@ -29,6 +29,10 @@ namespace CUE4Parse_Conversion.Animations.PSA
 
         public static FCompactPose[] LoadAsPoses(CAnimSequence sequence, USkeleton skeleton, int refFrame)
         {
+            // RefFrameIndex is authored against the source animation and can point past the last
+            // sampled key of the compressed data, UE clamps it the same way when building a base pose
+            refFrame = Math.Clamp(refFrame, 0, Math.Max(0, sequence.NumFrames - 1));
+
             var poses = new FCompactPose[1];
             for (int frameIndex = 0; frameIndex < poses.Length; frameIndex++)
             {
@@ -112,6 +116,10 @@ namespace CUE4Parse_Conversion.Animations.PSA
 
         public static FCompactPose[] LoadAsPoses(CAnimSequence sequence, USkeleton skeleton)
         {
+            // a track without scale keys keeps whatever we seed it with, and the neutral value
+            // differs between an additive delta (0) and an absolute pose (1)
+            var defaultScale = sequence.IsAdditive ? FVector.ZeroVector : FVector.OneVector;
+
             var poses = new FCompactPose[sequence.NumFrames];
             for (int frameIndex = 0; frameIndex < poses.Length; frameIndex++)
             {
@@ -123,7 +131,7 @@ namespace CUE4Parse_Conversion.Animations.PSA
 
                     var boneOrientation = FQuat.Identity;
                     var bonePosition = FVector.ZeroVector;
-                    var boneScale = FVector.ZeroVector;
+                    var boneScale = defaultScale;
 
                     track.GetBoneTransform(frameIndex, sequence.NumFrames, ref boneOrientation, ref bonePosition, ref boneScale);
 
@@ -132,7 +140,9 @@ namespace CUE4Parse_Conversion.Animations.PSA
                         Name = boneInfo.Name.ToString(),
                         ParentIndex = boneInfo.ParentIndex,
                         Transform = new FTransform(boneOrientation, bonePosition, boneScale),
-                        IsValidKey = frameIndex <= Math.Min(track.KeyPos.Length, track.KeyQuat.Length)
+                        // a constant track holds a single key that stays valid for every frame,
+                        // comparing the frame against the key count drops it after the second one
+                        IsValidKey = track.HasKeys()
                     };
                 }
             }

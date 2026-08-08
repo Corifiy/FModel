@@ -46,7 +46,8 @@ namespace CUE4Parse_Conversion.Animations.PSA
         public void RetargetTracks(USkeleton skeleton)
         {
             var retargetBasePose = RetargetBasePose is not null;
-            for (int skeletonBoneIndex = 0; skeletonBoneIndex < skeleton.BoneTree.Length; skeletonBoneIndex++)
+            var boneCount = Math.Min(skeleton.BoneTree.Length, Math.Min(Tracks.Count, skeleton.ReferenceSkeleton.FinalRefBonePose.Length));
+            for (int skeletonBoneIndex = 0; skeletonBoneIndex < boneCount; skeletonBoneIndex++)
             {
                 switch (skeleton.BoneTree[skeletonBoneIndex])
                 {

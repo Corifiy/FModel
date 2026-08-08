@@ -159,6 +159,11 @@ namespace CUE4Parse_Conversion.Animations
             {
                 case FUECompressedAnimData ueData:
                 {
+                    // a null stream means Deserialize gave up partway through and the failure was
+                    // swallowed, say the wrong engine version, an empty one is legitimate
+                    if (ueData.CompressedByteStream == null)
+                        throw new ParserException($"'{animSequence.Name}' has no compressed byte stream, it failed to deserialize. Make sure the correct UE version is configured.");
+
                     // There could be an animation consisting of only trans with offsets == -1, what means
                     // use of RefPose. In this case there's no point adding the animation to AnimSet. We'll
                     // create FMemReader even for empty CompressedByteStream, otherwise it would be hard to
@@ -237,7 +242,11 @@ namespace CUE4Parse_Conversion.Animations
             }
 
             // ok?
+            // an additive base pose is already retargeted as it gets loaded into poses, a plain
+            // sequence has to be retargeted here or every bone keeps the translation it was
+            // authored with instead of the one its retargeting mode asks for
             if (animSequence.IsValidAdditive()) animSeq = animSeq.ConvertAdditive(skeleton);
+            else animSeq.RetargetTracks(skeleton);
             AdjustSequenceBySkeleton(skeleton.ReferenceSkeleton, animSeq.RetargetBasePose ?? skeleton.ReferenceSkeleton.FinalRefBonePose, animSeq);
             return animSeq;
         }
@@ -253,23 +262,30 @@ namespace CUE4Parse_Conversion.Animations
             FCompactPose[] referencePoses;
             switch (refPoseType)
             {
+                // ABPT_LocalAnimFrame samples the base pose from this very sequence, but cooked data
+                // only keeps the additive deltas, so there is no source pose left to sample
                 case EAdditiveBasePoseType.ABPT_RefPose:
-                    referencePoses = FAnimationRuntime.LoadRestAsPoses(skeleton);
-                    break;
                 case EAdditiveBasePoseType.ABPT_LocalAnimFrame:
-                    referencePoses = FAnimationRuntime.LoadAsPoses(animSeq, skeleton, refFrameIndex);
+                    referencePoses = FAnimationRuntime.LoadRestAsPoses(skeleton);
                     break;
                 default:
                 {
                     var refPoseSkel = refPoseSeq?.Skeleton.Load<USkeleton>() ?? skeleton;
-                    refAnimSet = refPoseSkel.ConvertAnims(refPoseSeq);
+                    if (refPoseSeq != null && refPoseSeq.Name != animSeq.OriginalSequence.Name)
+                        refAnimSet = refPoseSkel.ConvertAnims(refPoseSeq);
 
-                    referencePoses = refPoseType switch
+                    // a missing or self referencing base pose leaves the deltas with nothing to add
+                    // onto, so lay them over the rest pose instead of failing the whole export
+                    if (refAnimSet is not { Sequences.Count: > 0 })
                     {
-                        EAdditiveBasePoseType.ABPT_AnimScaled => FAnimationRuntime.LoadAsPoses(refAnimSet.Sequences[0], refPoseSkel),
-                        EAdditiveBasePoseType.ABPT_AnimFrame => FAnimationRuntime.LoadAsPoses(refAnimSet.Sequences[0], refPoseSkel, refFrameIndex),
-                        _ => throw new ArgumentOutOfRangeException("Unsupported additive type " + refPoseType)
-                    };
+                        referencePoses = FAnimationRuntime.LoadRestAsPoses(skeleton);
+                        refAnimSet = null;
+                        break;
+                    }
+
+                    referencePoses = refPoseType == EAdditiveBasePoseType.ABPT_AnimScaled
+                        ? FAnimationRuntime.LoadAsPoses(refAnimSet.Sequences[0], refPoseSkel)
+                        : FAnimationRuntime.LoadAsPoses(refAnimSet.Sequences[0], refPoseSkel, refFrameIndex);
                     break;
                 }
             }
@@ -288,10 +304,12 @@ namespace CUE4Parse_Conversion.Animations
             for (var frameIndex = 0; frameIndex < additivePoses.Length; frameIndex++)
             {
                 var addPose = additivePoses[frameIndex];
+                // only ABPT_AnimScaled keeps one pose per frame, every other type resolves to a
+                // single pose which already has refFrameIndex baked in by the loaders above
                 var refPose = (FCompactPose)referencePoses[refPoseType switch
                 {
                     EAdditiveBasePoseType.ABPT_AnimScaled => frameIndex % maxRefPosFrame,
-                    _ => refFrameIndex
+                    _ => 0
                 }].Clone();
 
                 switch (animSeq.OriginalSequence.AdditiveAnimType)
@@ -536,7 +554,8 @@ namespace CUE4Parse_Conversion.Animations
             // read scale keys
             if (scaleOffset == -1)
             {
-                track.KeyScale = [FVector.OneVector];
+                // an additive track holds deltas, whose neutral scale is 0 rather than 1
+                track.KeyScale = [animSequence.IsValidAdditive() ? FVector.ZeroVector : FVector.OneVector];
             }
             else
             {
