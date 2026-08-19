@@ -2170,60 +2170,44 @@ public static class BlueprintDecompilerUtils
         return parts.Count > 0 ? $"{{{string.Join(", ", parts)}}}" : null;
     }
 
-    private static readonly string[] _unitDefaultFieldNames = ["Scale3D", "Scale"];
-
     /// <summary>
     /// Renders a value the way the editor's own copy does, so an authored pin - a bone list, a transform -
-    /// can be pasted straight back onto the node instead of retyped field by field. UE reads this back with
-    /// ImportText, which leaves anything absent at its default, so members already at their default are
-    /// dropped: it is what the editor emits, and it keeps a nine-bone list to one readable line.
+    /// can be pasted straight back onto the node instead of retyped field by field.
+    /// Every member is written, including the ones sitting at their type default. ImportText only touches
+    /// what the text names, so a partial string would leave whatever the pin already held: spelling each
+    /// member out makes a paste overwrite the pin completely rather than merge into it.
     /// Rotations stay quaternions here rather than becoming rotators, because that is the form
     /// FTransform's own text serialisation uses and it removes any question of which component is which.
     /// </summary>
-    public static string? FormatT3D(object? value, string? fieldName = null)
+    public static string? FormatT3D(object? value)
     {
         switch (value)
         {
             case UScriptArray array:
                 return $"({string.Join(",", array.Properties.Select(element => FormatT3D(element.GenericValue) ?? "()"))})";
             case FScriptStruct scriptStruct:
-                return FormatT3D(scriptStruct.StructType, fieldName);
+                return FormatT3D(scriptStruct.StructType);
             case FStructFallback fallback:
             {
                 var members = fallback.Properties
-                    .Select(property => (property.Name.Text, Value: FormatT3D(property.Tag?.GenericValue, property.Name.Text)))
+                    .Select(property => (property.Name.Text, Value: FormatT3D(property.Tag?.GenericValue)))
                     .Where(member => member.Value is not null)
                     .Select(member => $"{member.Text}={member.Value}");
                 return $"({string.Join(",", members)})";
             }
 
-            // A scale of one and a translation of zero are both "no value written", but they are different
-            // numbers, so the field decides which counts as untouched.
-            case FVector vector when _unitDefaultFieldNames.Contains(fieldName):
-                return vector is { X: 1, Y: 1, Z: 1 } ? null : FormatT3DVector(vector);
-            case FVector vector:
-                return vector is { X: 0, Y: 0, Z: 0 } ? null : FormatT3DVector(vector);
-            case FQuat quat:
-                return quat is { X: 0, Y: 0, Z: 0, W: 1 }
-                    ? null
-                    : $"(X={Round(quat.X)},Y={Round(quat.Y)},Z={Round(quat.Z)},W={Round(quat.W)})";
-            case FRotator rotator:
-                return rotator is { Pitch: 0, Yaw: 0, Roll: 0 }
-                    ? null
-                    : $"(Pitch={Round(rotator.Pitch)},Yaw={Round(rotator.Yaw)},Roll={Round(rotator.Roll)})";
+            case FVector vector: return $"(X={Round(vector.X)},Y={Round(vector.Y)},Z={Round(vector.Z)})";
+            case FQuat quat: return $"(X={Round(quat.X)},Y={Round(quat.Y)},Z={Round(quat.Z)},W={Round(quat.W)})";
+            case FRotator rotator: return $"(Pitch={Round(rotator.Pitch)},Yaw={Round(rotator.Yaw)},Roll={Round(rotator.Roll)})";
 
             // Enum values arrive qualified ("ERigElementType::Bone"); the text format wants the bare entry.
             case FName enumValue when enumValue.Text.Contains("::"):
                 return enumValue.Text.SubstringAfterLast("::");
-            case FName name: return name.IsNone ? null : $"\"{name.Text}\"";
+            case FName name: return $"\"{name.Text}\"";
             case string text: return $"\"{text}\"";
-            case bool flag: return flag ? "True" : null;
-            case float or double:
-                var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-                return number == 0 ? null : Round(number);
-            case byte or sbyte or short or ushort or int or uint or long or ulong:
-                var integer = value.ToString()!;
-                return integer == "0" ? null : integer;
+            case bool flag: return flag ? "True" : "False";
+            case float or double: return Round(Convert.ToDouble(value, CultureInfo.InvariantCulture));
+            case byte or sbyte or short or ushort or int or uint or long or ulong: return value.ToString()!;
             default: return null;
         }
     }
@@ -2402,10 +2386,22 @@ public static class BlueprintDecompilerUtils
                 }
                 case FRigVMCopyOp copyOp:
                 {
-                    var source = copyOp.Source.MemoryType == ERigVMMemoryType.Literal
+                    var fromLiteral = copyOp.Source.MemoryType == ERigVMMemoryType.Literal;
+                    var source = fromLiteral
                         ? storage.FormatLiteralValue(copyOp.Source, null)
                         : FormatOperand(copyOp.Source);
-                    stringBuilder.AppendLine($"{FormatOperand(copyOp.Target)} = {source};");
+                    var target = FormatOperand(copyOp.Target);
+                    stringBuilder.AppendLine($"{target} = {source};");
+
+                    // A struct assigned in one go - a transform, a settings block - is authored data someone
+                    // will want in the editor. The form above is for reading; this one is for pasting.
+                    if (fromLiteral && source.Contains('\n') &&
+                        storage.FormatLiteralT3D(copyOp.Source) is { Length: > 0 } clipboard)
+                    {
+                        var member = target.SubstringAfterLast('.');
+                        stringBuilder.AppendLine($"// Paste onto {member}: {clipboard}");
+                    }
+
                     stringBuilder.AppendLine();
                     writtenRegisters.Add((copyOp.Target.MemoryType, copyOp.Target.RegisterIndex));
                     break;
